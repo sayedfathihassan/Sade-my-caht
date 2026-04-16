@@ -1,5 +1,6 @@
 import express from "express";
-import { createServer as createViteServer } from "vite";
+// Vite is imported dynamically only in development to avoid production crashes
+
 import path from "path";
 import { fileURLToPath } from "url";
 import Pusher from "pusher";
@@ -795,7 +796,8 @@ app.get("/api/livekit/token", authenticateJWT, async (req: any, res) => {
 });
 
 // ─── Static / Vite ────────────────────────────────────────────────────────────
-if (process.env.NODE_ENV !== "production") {
+if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+  const { createServer: createViteServer } = await import("vite");
   const vite = await createViteServer({
     server: { middlewareMode: true },
     appType: "spa",
