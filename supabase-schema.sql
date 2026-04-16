@@ -10,7 +10,8 @@ CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 
 CREATE TABLE users (
   id UUID PRIMARY KEY REFERENCES auth.users(id),
-  username TEXT UNIQUE NOT NULL,
+  username TEXT UNIQUE NOT NULL, -- Display Name (Nickname)
+  login_name TEXT UNIQUE,        -- Internal login identifier (e.g. user123)
   email TEXT NOT NULL,
   avatar_url TEXT,
   bio TEXT,

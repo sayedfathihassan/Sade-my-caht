@@ -8,7 +8,7 @@ interface AuthContextType {
   supabaseUser: SupabaseUser | null;
   loading: boolean;
   signIn: () => Promise<void>;
-  signInWithEmail: (email: string, password: string, isSignUp: boolean) => Promise<void>;
+  signInWithUsername: (username: string, password: string, isSignUp: boolean, nickname?: string) => Promise<void>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -73,14 +73,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (error && error.code === 'PGRST116') {
         // Profile doesn't exist yet → create it
         const baseName =
+          sUser.user_metadata?.nickname ||
           sUser.user_metadata?.full_name ||
           sUser.user_metadata?.name ||
           sUser.email?.split('@')[0] ||
           'user';
 
+        // Extract login_name from fake email if not provided in metadata
+        const loginName = sUser.user_metadata?.login_name || sUser.email?.split('@')[0] || baseName;
+
         const newUser: any = {
           id: sUser.id,
           username: baseName,
+          login_name: loginName,
           email: sUser.email || '',
           avatar_url: sUser.user_metadata?.avatar_url || null,
           level: 1,
@@ -91,7 +96,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           is_verified: false,
           is_banned: false,
           is_super_admin: false,
-          // ✅ Default to 'user'. Super admin is set manually via SQL
           role: 'user',
           user_uid: generateUid(),
           follower_count: 0,
@@ -188,12 +192,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) throw error;
   };
 
-  const signInWithEmail = async (email: string, password: string, isSignUp: boolean) => {
+  const signInWithUsername = async (username: string, password: string, isSignUp: boolean, nickname?: string) => {
+    // Generate internal fake email
+    const fakeEmail = `${username.toLowerCase().trim()}@sada.local`;
+
     if (isSignUp) {
-      const { error } = await supabase.auth.signUp({ email, password });
+      if (!nickname) throw new Error("الاسم المستعار مطلوب للتسجيل");
+      const { error } = await supabase.auth.signUp({ 
+        email: fakeEmail, 
+        password,
+        options: {
+          data: {
+            nickname: nickname,
+            login_name: username.trim()
+          }
+        }
+      });
       if (error) throw error;
     } else {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await supabase.auth.signInWithPassword({ 
+        email: fakeEmail, 
+        password 
+      });
       if (error) throw error;
     }
   };
@@ -205,7 +225,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, supabaseUser, loading, signIn, signInWithEmail, signOut, refreshUser }}>
+    <AuthContext.Provider value={{ user, supabaseUser, loading, signIn, signInWithUsername, signOut, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

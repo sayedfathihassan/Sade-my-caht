@@ -1,22 +1,23 @@
 import { useState, FormEvent } from "react";
 import { useAuth } from "@/src/contexts/AuthContext";
 import { motion } from "motion/react";
-import { LogIn, Mail, Lock, AlertCircle } from "lucide-react";
+import { LogIn, User, UserCircle, Lock, AlertCircle } from "lucide-react";
 
 export function LoginScreen() {
-  const { signIn, signInWithEmail } = useAuth();
-  const [email, setEmail] = useState("");
+  const { signIn, signInWithUsername } = useAuth();
+  const [username, setUsername] = useState("");
+  const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const handleEmailAuth = async (e: FormEvent) => {
+  const handleAuth = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
     setLoading(true);
     try {
-      await signInWithEmail(email, password, isSignUp);
+      await signInWithUsername(username, password, isSignUp, nickname);
     } catch (err: any) {
       console.error(err);
       setError(err.message || "حدث خطأ أثناء تسجيل الدخول");
@@ -81,18 +82,33 @@ export function LoginScreen() {
           </div>
         )}
 
-        <form onSubmit={handleEmailAuth} className="space-y-4 mb-6">
+        <form onSubmit={handleAuth} className="space-y-4 mb-6">
           <div className="relative">
-            <Mail className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+            <User className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
             <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="البريد الإلكتروني"
+              type="text"
+              value={username}
+              onChange={(e) => setUsername(e.target.value)}
+              placeholder="اسم المستخدم (للدخول)"
               required
-              className="w-full bg-neutral-900 border border-white/5 rounded-2xl py-4 pr-12 pl-4 text-white placeholder:text-neutral-500 focus:outline-none focus:border-amber-500/50 transition-all"
+              className="w-full bg-neutral-900 border border-white/5 rounded-2xl py-4 pr-12 pl-4 text-white placeholder:text-neutral-500 focus:outline-none focus:border-amber-500/50 transition-all font-mono"
             />
           </div>
+
+          {isSignUp && (
+            <div className="relative">
+              <UserCircle className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
+              <input
+                type="text"
+                value={nickname}
+                onChange={(e) => setNickname(e.target.value)}
+                placeholder="الاسم المستعار (للعرض)"
+                required
+                className="w-full bg-neutral-900 border border-white/5 rounded-2xl py-4 pr-12 pl-4 text-white placeholder:text-neutral-500 focus:outline-none focus:border-amber-500/50 transition-all"
+              />
+            </div>
+          )}
+
           <div className="relative">
             <Lock className="absolute right-4 top-1/2 -translate-y-1/2 w-5 h-5 text-neutral-500" />
             <input
