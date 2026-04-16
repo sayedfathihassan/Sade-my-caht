@@ -7,7 +7,6 @@ interface AuthContextType {
   user: User | null;
   supabaseUser: SupabaseUser | null;
   loading: boolean;
-  signIn: () => Promise<void>;
   signInWithUsername: (username: string, password: string, isSignUp: boolean, nickname?: string) => Promise<{ success: boolean, isSignUp: boolean }>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
@@ -208,13 +207,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [supabaseUser?.id]);
 
-  const signIn = async () => {
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: { redirectTo: window.location.origin },
-    });
-    if (error) throw error;
-  };
+
 
   const signInWithUsername = async (username: string, password: string, isSignUp: boolean, nickname?: string) => {
     // Generate internal fake email
@@ -256,7 +249,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, supabaseUser, loading, signIn, signInWithUsername, signOut, refreshUser }}>
+    <AuthContext.Provider value={{ user, supabaseUser, loading, signInWithUsername, signOut, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );

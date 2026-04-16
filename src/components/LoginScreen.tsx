@@ -4,7 +4,7 @@ import { motion } from "motion/react";
 import { LogIn, User, UserCircle, Lock, AlertCircle } from "lucide-react";
 
 export function LoginScreen() {
-  const { signIn, signInWithUsername } = useAuth();
+  const { signInWithUsername } = useAuth();
   const [username, setUsername] = useState("");
   const [nickname, setNickname] = useState("");
   const [password, setPassword] = useState("");
@@ -24,25 +24,13 @@ export function LoginScreen() {
       if (result.isSignUp) {
         setSuccess("تم إنشاء الحساب بنجاح! يمكنك الآن تسجيل الدخول.");
         setIsSignUp(false);
-        setPassword(""); // Clear password for security/convenience
-        // Don't set loading false here yet if we expect an auto-login, 
-        // but since we switched to login mode, we should let them click "Login"
+        setPassword(""); 
       }
     } catch (err: any) {
       console.error(err);
       setError(err.message || "حدث خطأ أثناء تسجيل الدخول");
     } finally {
       setLoading(false);
-    }
-  };
-
-  const handleGoogleAuth = async () => {
-    setError(null);
-    try {
-      await signIn();
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "حدث خطأ أثناء تسجيل الدخول");
     }
   };
 
@@ -136,23 +124,7 @@ export function LoginScreen() {
             ) : (
               <span>{isSignUp ? "إنشاء حساب جديد" : "تسجيل الدخول"}</span>
             )}
-          </button>
         </form>
-
-        <div className="flex items-center gap-4 mb-6">
-          <div className="h-px bg-white/5 flex-1" />
-          <span className="text-xs text-neutral-500 font-bold">أو</span>
-          <div className="h-px bg-white/5 flex-1" />
-        </div>
-
-        <button
-          onClick={handleGoogleAuth}
-          type="button"
-          className="w-full bg-white text-black font-bold py-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-neutral-200 transition-all active:scale-95 shadow-xl mb-6"
-        >
-          <LogIn className="w-5 h-5" />
-          <span>تسجيل الدخول عبر جوجل</span>
-        </button>
 
         <button
           onClick={() => setIsSignUp(!isSignUp)}
