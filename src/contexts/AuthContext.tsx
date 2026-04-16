@@ -8,7 +8,7 @@ interface AuthContextType {
   supabaseUser: SupabaseUser | null;
   loading: boolean;
   signIn: () => Promise<void>;
-  signInWithUsername: (username: string, password: string, isSignUp: boolean, nickname?: string) => Promise<void>;
+  signInWithUsername: (username: string, password: string, isSignUp: boolean, nickname?: string) => Promise<{ success: boolean, isSignUp: boolean }>;
   signOut: () => Promise<void>;
   refreshUser: () => Promise<void>;
 }
@@ -155,12 +155,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // ✅ Listen to Supabase auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        clearTimeout(timer); // Clear timeout if auth state is found
+        console.log('Auth state changed:', event, session?.user?.id);
+        
         setSupabaseUser(session?.user ?? null);
+        
         if (session?.user) {
           setLoading(true);
-          await fetchProfile(session.user);
+          // Re-start safety timeout for profile fetch
+          const profileTimer = setTimeout(() => {
+            console.warn('Profile fetch timed out. Forcing stop loading...');
+            setLoading(false);
+          }, 8000); // Give 8 seconds for DB fetch
+
+          try {
+            await fetchProfile(session.user);
+          } finally {
+            clearTimeout(profileTimer);
+            clearTimeout(timer); // Final stop
+          }
         } else {
+          clearTimeout(timer);
           setUser(null);
           setLoading(false);
         }
@@ -208,7 +222,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     if (isSignUp) {
       if (!nickname) throw new Error("الاسم المستعار مطلوب للتسجيل");
-      const { error } = await supabase.auth.signUp({ 
+      
+      const { data, error } = await supabase.auth.signUp({ 
         email: fakeEmail, 
         password,
         options: {
@@ -218,13 +233,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
       });
+      
       if (error) throw error;
+      
+      // If registration succeeded but session is null (e.g. needs confirmation), 
+      // we still treat it as success for the UI.
+      return { success: true, isSignUp: true };
     } else {
-      const { error } = await supabase.auth.signInWithPassword({ 
+      const { data, error } = await supabase.auth.signInWithPassword({ 
         email: fakeEmail, 
         password 
       });
       if (error) throw error;
+      return { success: true, isSignUp: false };
     }
   };
 

@@ -10,14 +10,24 @@ export function LoginScreen() {
   const [password, setPassword] = useState("");
   const [isSignUp, setIsSignUp] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleAuth = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
+    setSuccess(null);
     setLoading(true);
     try {
-      await signInWithUsername(username, password, isSignUp, nickname);
+      const result = await signInWithUsername(username, password, isSignUp, nickname);
+      
+      if (result.isSignUp) {
+        setSuccess("تم إنشاء الحساب بنجاح! يمكنك الآن تسجيل الدخول.");
+        setIsSignUp(false);
+        setPassword(""); // Clear password for security/convenience
+        // Don't set loading false here yet if we expect an auto-login, 
+        // but since we switched to login mode, we should let them click "Login"
+      }
     } catch (err: any) {
       console.error(err);
       setError(err.message || "حدث خطأ أثناء تسجيل الدخول");
@@ -61,23 +71,18 @@ export function LoginScreen() {
           <div className="mb-6 p-4 bg-red-500/10 border border-red-500/20 rounded-2xl flex items-start gap-3 text-right">
             <AlertCircle className="w-5 h-5 text-red-500 shrink-0 mt-0.5" />
             <div className="text-sm text-red-400">
-              <p className="font-bold mb-1">فشل تسجيل الدخول</p>
+              <p className="font-bold mb-1">فشل العملية</p>
               <p>{error}</p>
-              {error.includes("provider is not enabled") && (
-                <p className="mt-2 text-xs opacity-80">
-                  ملاحظة: لتسجيل الدخول عبر جوجل، يجب تفعيل مزود Google في لوحة تحكم Supabase (Authentication &gt; Providers). يمكنك استخدام البريد الإلكتروني مؤقتاً.
-                </p>
-              )}
-              {error.includes("Invalid API key") && (
-                <p className="mt-2 text-xs opacity-80">
-                  مفتاح API غير صالح. يرجى التحقق من إعدادات البيئة (Environment Variables) والتأكد من صحة مفتاح VITE_SUPABASE_ANON_KEY.
-                </p>
-              )}
-              {error.includes("supabaseKey is required") && (
-                <p className="mt-2 text-xs opacity-80">
-                  مفتاح Supabase مفقود. يرجى إضافة VITE_SUPABASE_ANON_KEY و VITE_SUPABASE_URL في إعدادات البيئة.
-                </p>
-              )}
+            </div>
+          </div>
+        )}
+
+        {success && (
+          <div className="mb-6 p-4 bg-green-500/10 border border-green-500/20 rounded-2xl flex items-start gap-3 text-right animate-in fade-in slide-in-from-top-2">
+            <div className="w-5 h-5 text-green-500 shrink-0 mt-0.5">✅</div>
+            <div className="text-sm text-green-400">
+              <p className="font-bold mb-1">تم بنجاح</p>
+              <p>{success}</p>
             </div>
           </div>
         )}
