@@ -124,6 +124,7 @@ export function LoginScreen() {
             ) : (
               <span>{isSignUp ? "إنشاء حساب جديد" : "تسجيل الدخول"}</span>
             )}
+          </button>
         </form>
 
         <button
