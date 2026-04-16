@@ -144,9 +144,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   useEffect(() => {
+    // ✅ Safety Timeout: Force stop loading after 5 seconds to prevent infinite hang
+    const timer = setTimeout(() => {
+      if (loading) {
+        console.warn('Auth state check timed out. Forcing stop loading...');
+        setLoading(false);
+      }
+    }, 5000);
+
     // ✅ Listen to Supabase auth state changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
+        clearTimeout(timer); // Clear timeout if auth state is found
         setSupabaseUser(session?.user ?? null);
         if (session?.user) {
           setLoading(true);
@@ -179,6 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
 
     return () => {
+      clearTimeout(timer);
       subscription.unsubscribe();
       if (userSub) supabase.removeChannel(userSub);
     };
