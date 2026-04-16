@@ -1,0 +1,5 @@
+{
+  "name": "Sada - Social Voice Chat",
+  "description": "A premium Arabic social voice chat platform with real-time rooms, virtual gifts, and interactive seat systems.",
+  "requestFramePermissions": ["microphone"]
+}

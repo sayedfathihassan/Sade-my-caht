@@ -1,0 +1,262 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "Platform user profile and balances",
+      "type": "object",
+      "properties": {
+        "username": { "type": "string", "description": "Display name" },
+        "email": { "type": "string", "format": "email" },
+        "avatarUrl": { "type": "string" },
+        "level": { "type": "integer" },
+        "coins": { "type": "integer" },
+        "diamonds": { "type": "integer" },
+        "isVerified": { "type": "boolean" },
+        "isBanned": { "type": "boolean" },
+        "followerCount": { "type": "integer" },
+        "followingCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["username", "email", "level", "coins", "diamonds"]
+    },
+    "Follow": {
+      "title": "Follow",
+      "description": "Relationship between two users",
+      "type": "object",
+      "properties": {
+        "followerId": { "type": "string" },
+        "followingId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["followerId", "followingId", "createdAt"]
+    },
+    "Post": {
+      "title": "Post",
+      "description": "User shared content",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "avatarUrl": { "type": "string" },
+        "content": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "likes": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "username", "content", "createdAt"]
+    },
+    "Room": {
+      "title": "Room",
+      "description": "Voice chat room details",
+      "type": "object",
+      "properties": {
+        "ownerId": { "type": "string" },
+        "name": { "type": "string" },
+        "description": { "type": "string" },
+        "coverUrl": { "type": "string" },
+        "type": { "type": "string", "enum": ["public", "private", "vip"] },
+        "maxSeats": { "type": "integer" },
+        "isLive": { "type": "boolean" },
+        "memberCount": { "type": "integer" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["ownerId", "name", "type", "maxSeats", "isLive"]
+    },
+    "ChatMessage": {
+      "title": "ChatMessage",
+      "description": "Real-time chat messages in rooms",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string" },
+        "userId": { "type": "string" },
+        "username": { "type": "string" },
+        "content": { "type": "string" },
+        "type": { "type": "string", "enum": ["text", "gift", "system"] },
+        "timestamp": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "userId", "username", "content", "type", "timestamp"]
+    },
+    "Conversation": {
+      "title": "Conversation",
+      "description": "Metadata for a private chat between two users",
+      "type": "object",
+      "properties": {
+        "participants": { "type": "array", "items": { "type": "string" } },
+        "lastMessage": { "type": "string" },
+        "lastMessageAt": { "type": "string", "format": "date-time" },
+        "unreadCount": { "type": "object", "description": "Map of userId to unread count" }
+      },
+      "required": ["participants", "lastMessageAt"]
+    },
+    "PrivateMessage": {
+      "title": "PrivateMessage",
+      "description": "Individual message in a private conversation",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string" },
+        "content": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "read": { "type": "boolean" }
+      },
+      "required": ["senderId", "content", "timestamp"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "User notifications for messages, gifts, etc.",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "type": { "type": "string", "enum": ["private_message", "room_announcement", "gift_arrival", "system"] },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "data": { "type": "object" },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "type", "title", "message", "read", "createdAt"]
+    },
+    "PKChallenge": {
+      "title": "PKChallenge",
+      "description": "Gift-based competition between two users in a room",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string" },
+        "user1Id": { "type": "string" },
+        "user2Id": { "type": "string" },
+        "user1Points": { "type": "integer" },
+        "user2Points": { "type": "integer" },
+        "status": { "type": "string", "enum": ["active", "completed"] },
+        "winnerId": { "type": "string" },
+        "duration": { "type": "integer", "description": "Duration in seconds" },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "endsAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "user1Id", "user2Id", "status", "startedAt", "endsAt"]
+    },
+    "LuckyBox": {
+      "title": "LuckyBox",
+      "description": "Coin pool distributed randomly to room members",
+      "type": "object",
+      "properties": {
+        "roomId": { "type": "string" },
+        "creatorId": { "type": "string" },
+        "totalAmount": { "type": "integer" },
+        "remainingAmount": { "type": "integer" },
+        "totalWinners": { "type": "integer" },
+        "winners": { "type": "array", "items": { "type": "string" } },
+        "status": { "type": "string", "enum": ["active", "distributed"] },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["roomId", "creatorId", "totalAmount", "status", "createdAt"]
+    },
+    "VIPSubscription": {
+      "title": "VIPSubscription",
+      "description": "User VIP membership details",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "tier": { "type": "string", "enum": ["silver", "gold", "diamond"] },
+        "startedAt": { "type": "string", "format": "date-time" },
+        "expiresAt": { "type": "string", "format": "date-time" },
+        "perks": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["userId", "tier", "startedAt", "expiresAt"]
+    },
+    "DailyQuest": {
+      "title": "DailyQuest",
+      "description": "Platform-wide daily tasks for users",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "target": { "type": "integer" },
+        "rewardCoins": { "type": "integer" },
+        "rewardXp": { "type": "integer" },
+        "type": { "type": "string", "enum": ["time", "gift", "chat", "game"] }
+      },
+      "required": ["title", "target", "rewardCoins", "type"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "User",
+      "description": "User profile data"
+    },
+    "/rooms/{roomId}": {
+      "schema": "Room",
+      "description": "Room metadata"
+    },
+    "/rooms/{roomId}/messages/{messageId}": {
+      "schema": "ChatMessage",
+      "description": "Room chat history"
+    },
+    "/rooms/{roomId}/pk_challenges/{challengeId}": {
+      "schema": "PKChallenge",
+      "description": "Active or past PK challenges in the room"
+    },
+    "/rooms/{roomId}/lucky_boxes/{boxId}": {
+      "schema": "LuckyBox",
+      "description": "Lucky boxes in the room"
+    },
+    "/rooms/{roomId}/waitlist/{userId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "userId": { "type": "string" },
+          "joinedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "Mic queue waitlist"
+    },
+    "/vip_subscriptions/{userId}": {
+      "schema": "VIPSubscription",
+      "description": "User VIP status"
+    },
+    "/daily_quests/{questId}": {
+      "schema": "DailyQuest",
+      "description": "Available daily quests"
+    },
+    "/users/{userId}/quest_progress/{questId}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "current": { "type": "integer" },
+          "isClaimed": { "type": "boolean" },
+          "updatedAt": { "type": "string", "format": "date-time" }
+        }
+      },
+      "description": "User progress on specific quests"
+    },
+    "/rooms/{roomId}/seats/{seatNumber}": {
+      "schema": {
+        "type": "object",
+        "properties": {
+          "userId": { "type": "string" },
+          "isLocked": { "type": "boolean" },
+          "isMuted": { "type": "boolean" }
+        }
+      },
+      "description": "Real-time seat occupancy"
+    },
+    "/conversations/{conversationId}": {
+      "schema": "Conversation",
+      "description": "Private chat metadata"
+    },
+    "/conversations/{conversationId}/messages/{messageId}": {
+      "schema": "PrivateMessage",
+      "description": "Private chat messages"
+    },
+    "/follows/{followId}": {
+      "schema": "Follow",
+      "description": "User follow relationships"
+    },
+    "/posts/{postId}": {
+      "schema": "Post",
+      "description": "User posts"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "User notifications"
+    }
+  }
+}
