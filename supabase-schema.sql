@@ -468,6 +468,18 @@ EXECUTE FUNCTION prevent_finance_update();
 -- 10. ROW LEVEL SECURITY (RLS) POLICIES
 -- ==========================================
 
+-- Users Table Policies
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Enable read access for all users" ON users;
+CREATE POLICY "Enable read access for all users" ON users FOR SELECT USING (true);
+
+DROP POLICY IF EXISTS "Users can update own data" ON users;
+CREATE POLICY "Users can update own data" ON users FOR UPDATE USING (auth.uid() = id);
+
+DROP POLICY IF EXISTS "Users can insert their own profile" ON users;
+CREATE POLICY "Users can insert their own profile" ON users FOR INSERT WITH CHECK (auth.uid() = id);
+
 -- USERS
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
 CREATE POLICY "Public Profiles are viewable" ON users FOR SELECT USING (true);
