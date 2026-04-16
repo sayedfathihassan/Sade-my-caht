@@ -6,7 +6,7 @@ export const DAILY_TASKS: Task[] = [
   { id: 'task_time', title: 'المستمع الوفي', description: 'ابقَ في الغرفة لمدة 30 دقيقة', target: 30, rewardCoins: 500, rewardXp: 100, type: 'time', frequency: 'daily', isActive: true },
   { id: 'task_chat', title: 'المتفاعل الاجتماعي', description: 'أرسل 20 رسالة في الدردشة', target: 20, rewardCoins: 200, rewardXp: 50, type: 'chat', frequency: 'daily', isActive: true },
   { id: 'task_gift', title: 'الكريم السخي', description: 'أرسل 5 هدايا للأصدقاء', target: 5, rewardCoins: 1000, rewardXp: 200, type: 'gift', frequency: 'daily', isActive: true },
-  { id: 'task_mic', title: 'صوت الصدى', description: 'تحدث في المايك لمدة 10 دقائق', target: 10, rewardCoins: 800, rewardXp: 150, type: 'mic', frequency: 'daily', isActive: true },
+  { id: 'task_mic', title: 'صوت SG', description: 'تحدث في المايك لمدة 10 دقائق', target: 10, rewardCoins: 800, rewardXp: 150, type: 'mic', frequency: 'daily', isActive: true },
   { id: 'task_game', title: 'المنافس القوي', description: 'العب 3 ألعاب مصغرة', target: 3, rewardCoins: 400, rewardXp: 100, type: 'game', frequency: 'daily', isActive: true },
 ];
 

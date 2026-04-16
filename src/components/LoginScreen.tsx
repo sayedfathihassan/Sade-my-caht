@@ -45,11 +45,11 @@ export function LoginScreen() {
         className="relative z-10 text-center max-w-sm w-full"
       >
         <div className="w-24 h-24 bg-gradient-to-br from-amber-400 to-amber-600 rounded-3xl mx-auto mb-8 flex items-center justify-center shadow-2xl shadow-amber-500/20 rotate-12">
-          <span className="text-4xl font-black text-black -rotate-12">صدى</span>
+          <span className="text-4xl font-black text-black -rotate-12">SG</span>
         </div>
 
         <h1 className="text-4xl font-extrabold text-neutral-50 mb-4 tracking-tight">
-          أهلاً بك في صدى
+          أهلاً بك في SG
         </h1>
         <p className="text-neutral-400 mb-8 text-sm leading-relaxed">
           أول منصة اجتماعية صوتية عربية تجمعك بأصدقائك في غرف تفاعلية

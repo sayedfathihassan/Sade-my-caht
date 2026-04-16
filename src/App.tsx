@@ -237,10 +237,10 @@ function MainApp() {
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="w-10 h-10 bg-gradient-to-br from-amber-400 to-amber-600 rounded-xl flex items-center justify-center font-black text-black shadow-lg shadow-amber-500/20">
-              ص
+              SG
             </div>
             <div>
-              <h1 className="font-bold text-lg">صدى</h1>
+              <h1 className="font-bold text-lg">SG</h1>
               <div className="flex items-center gap-2 text-xs text-neutral-500">
                 <Wallet className="w-3 h-3 text-amber-500" />
                 <span>{user.coins.toLocaleString()} عملة</span>
