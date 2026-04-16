@@ -62,7 +62,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Fetch / create user profile from DB
   const fetchProfile = async (sUser: SupabaseUser) => {
+    console.log('🔄 Starting fetchProfile for user:', sUser.id);
     try {
+      console.log('📡 Querying users table...');
       const { data, error } = await supabase
         .from('users')
         .select('*')
@@ -70,7 +72,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         .single();
 
       if (error && error.code === 'PGRST116') {
-        // Profile doesn't exist yet → create it
+        console.log('✨ Profile not found, creating new one...');
         const baseName =
           sUser.user_metadata?.nickname ||
           sUser.user_metadata?.full_name ||
@@ -78,7 +80,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           sUser.email?.split('@')[0] ||
           'user';
 
-        // Extract login_name from fake email if not provided in metadata
         const loginName = sUser.user_metadata?.login_name || sUser.email?.split('@')[0] || baseName;
 
         const newUser: any = {
@@ -104,17 +105,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           last_active_at: new Date().toISOString(),
         };
 
+        console.log('📝 Inserting new user record...');
         const { data: createdData, error: createError } = await supabase
           .from('users')
           .insert([newUser])
           .select()
           .single();
 
-        if (createError) throw createError;
+        if (createError) {
+          console.error('❌ Error creating profile:', createError);
+          throw createError;
+        }
+        console.log('✅ Profile created and loaded');
         setUser(mapSupabaseUser(createdData));
       } else if (data) {
-        // ✅ Check ban before letting user in
+        console.log('✅ Profile found:', data.username);
         if (data.is_banned) {
+          console.warn('🚫 User is banned');
           await supabase.auth.signOut();
           alert('حسابك محظور. يرجى التواصل مع الإدارة.');
           setUser(null);
@@ -123,15 +130,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         setUser(mapSupabaseUser(data));
 
-        // Update last active timestamp
-        await supabase
+        // Background update: don't await to avoid blocking UI entrance
+        console.log('⏱ Updating last_active_at in background...');
+        supabase
           .from('users')
           .update({ last_active_at: new Date().toISOString() })
-          .eq('id', sUser.id);
+          .eq('id', sUser.id)
+          .then(({ error: updateError }) => {
+            if (updateError) console.error('⚠️ Failed to update last active timestamp:', updateError);
+            else console.log('✅ Last active timestamp updated');
+          });
+          
+      } else if (error) {
+        console.error('❌ Error during users table select:', error);
       }
     } catch (err) {
-      console.error('Error fetching profile:', err);
+      console.error('💣 Global error in fetchProfile:', err);
     } finally {
+      console.log('🏁 fetchProfile finished, setting loading to false');
       setLoading(false);
     }
   };
