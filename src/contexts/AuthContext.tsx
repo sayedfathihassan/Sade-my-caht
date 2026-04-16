@@ -158,70 +158,185 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await fetchProfile(supabaseUser);
   };
 
-  useEffect(() => {
-    // ✅ Safety Timeout: Force stop loading after 5 seconds to prevent infinite hang
-    const timer = setTimeout(() => {
-      if (loading) {
-        console.warn('Auth state check timed out. Forcing stop loading...');
-        setLoading(false);
-      }
-    }, 5000);
+  const fetchProfile = async (sUser: SupabaseUser) => {
+    console.log('🔄 Starting fetchProfile for user:', sUser.id);
+    try {
+      // ✅ Safety: Add a promise timeout for the database query itself
+      const dbQuery = supabase
+        .from('users')
+        .select('*')
+        .eq('id', sUser.id)
+        .single();
+      
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('DATABASE_TIMEOUT')), 10000)
+      );
 
-    // ✅ Listen to Supabase auth state changes
+      console.log('📡 Querying users table (with 10s timeout)...');
+      const { data, error } = await (Promise.race([dbQuery, timeoutPromise]) as Promise<any>);
+
+      if (error && error.code === 'PGRST116') {
+        console.log('✨ Profile not found, creating new one...');
+        const baseName =
+          sUser.user_metadata?.nickname ||
+          sUser.user_metadata?.full_name ||
+          sUser.user_metadata?.name ||
+          sUser.email?.split('@')[0] ||
+          'user';
+
+        const loginName = sUser.user_metadata?.login_name || sUser.email?.split('@')[0] || baseName;
+
+        const newUser: any = {
+          id: sUser.id,
+          username: baseName,
+          login_name: loginName,
+          email: sUser.email || '',
+          avatar_url: sUser.user_metadata?.avatar_url || null,
+          level: 1,
+          xp: 0,
+          next_level_xp: 100,
+          coins: 1000,
+          diamonds: 0,
+          is_verified: false,
+          is_banned: false,
+          is_super_admin: false,
+          role: 'user',
+          user_uid: generateUid(),
+          follower_count: 0,
+          following_count: 0,
+          last_task_reset_at: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+          last_active_at: new Date().toISOString(),
+        };
+
+        console.log('📝 Inserting new user record...');
+        const { data: createdData, error: createError } = await supabase
+          .from('users')
+          .insert([newUser])
+          .select()
+          .single();
+
+        if (createError) {
+          console.error('❌ Error creating profile:', createError);
+          throw createError;
+        }
+        console.log('✅ Profile created and loaded');
+        setUser(mapSupabaseUser(createdData));
+      } else if (data) {
+        console.log('✅ Profile found:', data.username);
+        if (data.is_banned) {
+          console.warn('🚫 User is banned');
+          await supabase.auth.signOut();
+          alert('حسابك محظور. يرجى التواصل مع الإدارة.');
+          setUser(null);
+          return;
+        }
+
+        setUser(mapSupabaseUser(data));
+
+        // Background update: don't await to avoid blocking UI entrance
+        console.log('⏱ Updating last_active_at in background...');
+        supabase
+          .from('users')
+          .update({ last_active_at: new Date().toISOString() })
+          .eq('id', sUser.id)
+          .then(({ error: updateError }) => {
+            if (updateError) console.error('⚠️ Failed to update last active timestamp:', updateError);
+            else console.log('✅ Last active timestamp updated');
+          });
+          
+      } else if (error) {
+        console.error('❌ Error during users table select:', error);
+      }
+    } catch (err: any) {
+      if (err.message === 'DATABASE_TIMEOUT') {
+        console.error('💣 Database query timed out. Check your Supabase RLS or Connection.');
+      } else {
+        console.error('💣 Global error in fetchProfile:', err);
+      }
+    } finally {
+      console.log('🏁 fetchProfile finished, setting loading to false');
+      setLoading(false);
+    }
+  };
+
+  const refreshUser = async () => {
+    if (!supabaseUser) return;
+    await fetchProfile(supabaseUser);
+  };
+
+  // ✅ 1. Auth State Listener (Runs ONCE on mount)
+  useEffect(() => {
+    console.log('🔑 Initializing Auth Listener...');
+    
+    // Standard safety timeout just in case
+    const authTimer = setTimeout(() => {
+      if (loading) setLoading(false);
+    }, 15000);
+
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('Auth state changed:', event, session?.user?.id);
+        console.log('🔔 Auth state changed:', event, session?.user?.id);
         
         setSupabaseUser(session?.user ?? null);
         
         if (session?.user) {
           setLoading(true);
-          // Re-start safety timeout for profile fetch
-          const profileTimer = setTimeout(() => {
-            console.warn('Profile fetch timed out. Forcing stop loading...');
-            setLoading(false);
-          }, 8000); // Give 8 seconds for DB fetch
-
-          try {
-            await fetchProfile(session.user);
-          } finally {
-            clearTimeout(profileTimer);
-            clearTimeout(timer); // Final stop
-          }
+          await fetchProfile(session.user);
         } else {
-          clearTimeout(timer);
           setUser(null);
           setLoading(false);
         }
+        clearTimeout(authTimer);
       }
     );
 
-    // ✅ Re-subscribe to real user changes in Supabase
-    let userSub: any = null;
-    if (supabaseUser) {
-      userSub = supabase
-        .channel(`user_profile_${supabaseUser.id}`)
-        .on(
-          'postgres_changes',
-          {
-            event: 'UPDATE',
-            schema: 'public',
-            table: 'users',
-            filter: `id=eq.${supabaseUser.id}`,
-          },
-          (payload) => {
-            setUser(mapSupabaseUser(payload.new));
-          }
-        )
-        .subscribe();
-    }
+    // Initial session check
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session) {
+        console.log('📡 Existing session found:', session.user.id);
+        setSupabaseUser(session.user);
+        fetchProfile(session.user);
+      } else {
+        console.log('📡 No existing session');
+        setLoading(false);
+      }
+    });
 
     return () => {
-      clearTimeout(timer);
+      console.log('🔌 Cleaning up Auth Listener');
       subscription.unsubscribe();
-      if (userSub) supabase.removeChannel(userSub);
+      clearTimeout(authTimer);
     };
-  }, [supabaseUser?.id]);
+  }, []);
+
+  // ✅ 2. Realtime User Profile Subscription (Depends on user.id)
+  useEffect(() => {
+    if (!user?.id) return;
+    
+    console.log('🎙 Subscribing to Realtime profile updates for:', user.id);
+    const userSub = supabase
+      .channel(`user_profile_${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'users',
+          filter: `id=eq.${user.id}`,
+        },
+        (payload) => {
+          console.log('🚀 Realtime profile update received');
+          setUser(mapSupabaseUser(payload.new));
+        }
+      )
+      .subscribe();
+
+    return () => {
+      console.log('🔇 Unsubscribing from Realtime profile updates');
+      supabase.removeChannel(userSub);
+    };
+  }, [user?.id]);
 
 
 
