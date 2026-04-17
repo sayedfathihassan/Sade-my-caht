@@ -1480,7 +1480,34 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
           {activeLuckyBox && (
             <LuckyBoxDisplay 
               box={activeLuckyBox} 
-              onClaim={() => {}} 
+              onClaim={async () => {
+                if (!user) return;
+                try {
+                  const { data: sessionData } = await supabase.auth.getSession();
+                  const token = sessionData.session?.access_token;
+                  
+                  const res = await fetch('/api/room/lucky-box/claim', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ boxId: activeLuckyBox.id, roomId })
+                  });
+
+                  if (!res.ok) {
+                    const err = await res.json();
+                    throw new Error(err.error || "فشل فتح الصندوق");
+                  }
+                  
+                  const result = await res.json();
+                  alert(`مبروك! لقد ربحت ${result.winAmount} عملة! 💰✨`);
+                  setActiveLuckyBox(null);
+                  refreshUser(); // Update balance
+                } catch (e: any) {
+                  alert(e.message);
+                }
+              }} 
             />
           )}
           {/* Gift Goals */}
@@ -1783,10 +1810,17 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
             <input
               value={chatInput}
               onChange={(e) => setChatInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendMessage(chatInput);
+                }
+              }}
+              autoComplete="off"
               placeholder="قل مرحباً..."
               className="w-full bg-neutral-900/50 backdrop-blur-md border border-neutral-800 rounded-xl md:rounded-2xl px-4 py-2.5 md:py-3 text-sm focus:outline-none focus:border-amber-500/50"
             />
-            <button type="submit" className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500">
+            <button type="submit" className="absolute left-3 top-1/2 -translate-y-1/2 text-amber-500 hover:scale-110 active:scale-95 transition-transform">
               <Send className="w-4 h-4 md:w-5 md:h-5" />
             </button>
           </form>

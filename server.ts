@@ -646,13 +646,35 @@ app.post("/api/room/slow-mode", authenticateJWT, async (req: any, res) => {
   } catch (e) { res.status(500).json({ error: "Pusher failed" }); }
 });
 
-// ─── Room: Audit Log ─────────────────────────────────────────────────────────
-app.post("/api/room/audit-log/add", authenticateJWT, async (req, res) => {
+// ─── Room: Audit Log (Secure DB Insert + Pusher) ─────────────────────────────
+app.post("/api/room/audit-log/add", authenticateJWT, async (req: any, res) => {
   const { roomId, log } = req.body;
+  const adminId = req.user.id;
+
   try {
-    await pusher.trigger(`room-${roomId}`, "audit-log-added", { log });
-    res.json({ success: true });
-  } catch (e) { res.status(500).json({ error: "Pusher failed" }); }
+    // 1. Save to Database
+    const { data: insertedLog, error } = await supabaseAdmin
+      .from('room_audit_logs')
+      .insert({
+        room_id: roomId,
+        admin_id: adminId,
+        action: log.action,
+        target_id: log.targetId,
+        details: log.details
+      })
+      .select()
+      .single();
+
+    if (error) throw error;
+
+    // 2. Notify Room
+    await pusher.trigger(`room-${roomId}`, "audit-log-added", { log: insertedLog });
+    
+    res.json({ success: true, log: insertedLog });
+  } catch (e: any) {
+    console.error("Audit log failed:", e.message);
+    res.status(500).json({ error: "فشل تسجيل العملية" });
+  }
 });
 
 // ─── Room: Poll Create ───────────────────────────────────────────────────────
@@ -820,6 +842,44 @@ app.post("/api/room/lucky-box", authenticateJWT, async (req: any, res) => {
     });
 
     res.json({ success: true, newBalance: user.coins - totalAmount, luckyBox });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Room: Claim Lucky Box (RPC Wrapper) ──────────────────────────────────────
+app.post("/api/room/lucky-box/claim", authenticateJWT, async (req: any, res) => {
+  const { boxId, roomId } = req.body;
+  const userId = req.user.id;
+
+  try {
+    // Call the PostgreSQL RPC function
+    const { data: winAmount, error } = await supabaseAdmin.rpc('claim_lucky_box', {
+      p_box_id: boxId,
+      p_user_id: userId
+    });
+
+    if (error) throw error;
+
+    if (winAmount > 0) {
+      // Notify the room about the winner
+      const { data: user } = await supabaseAdmin.from('users').select('username').eq('id', userId).single();
+      
+      await pusher.trigger(`room-${roomId}`, "new-message", {
+        message: {
+          id: Date.now().toString(),
+          userId: userId,
+          username: user?.username || 'مستخدم',
+          content: `فتح صندوق الحظ وربح ${winAmount} عملة! 💰✨`,
+          type: "system",
+          timestamp: new Date().toISOString()
+        }
+      });
+
+      res.json({ success: true, winAmount });
+    } else {
+      res.status(400).json({ error: "انتهى الصندوق أو قمت بالاستلام مسبقاً" });
+    }
   } catch (err: any) {
     res.status(500).json({ error: err.message });
   }
