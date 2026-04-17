@@ -186,7 +186,7 @@ export function UserModal({ isOpen, onClose, userId, onStartChat, onSendGift, ro
                   <h2 className="text-xl font-bold">{user?.username || "جاري التحميل..."}</h2>
                   {user?.isVerified && <Star className="w-4 h-4 text-amber-500 fill-amber-500" />}
                 </div>
-                <p className="text-xs text-neutral-500 mb-4">ID: {userId}</p>
+                <p className="text-xs text-neutral-500 mb-4">ID: {user?.user_uid || userId.slice(0, 8)}</p>
 
                 {/* Chat Bubble Preview */}
                 {user?.activeChatBubbleId && (

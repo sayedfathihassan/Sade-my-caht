@@ -677,6 +677,9 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         .single();
       
       if (data) {
+        setOnSeat(null);
+        // Stop publishing audio
+        livekitService.unpublish();
         setMyRole(data.role);
       }
     };
@@ -803,24 +806,20 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
     if (seat?.is_locked) return;
     
     try {
-      await supabase
+      const { data, error } = await supabase
         .from('seats')
         .update({
           user_id: user.id,
           joined_at: new Date().toISOString(),
         })
         .eq('room_id', roomId)
-        .eq('number', seatNumber);
+        .eq('number', seatNumber)
+        .select()
+        .single();
       
-      try {
-        await livekitService.publish();
+      if (data) {
+        setOnSeat(seatNumber);
         setIsMuted(false);
-      } catch (error) {
-        console.error('Microphone access denied:', error);
-        alert("يرجى السماح بالوصول إلى الميكروفون للمشاركة في المحادثة الصوتية.");
-        await handleLeaveSeat();
-      }
-    } catch (error) {
       console.error('Error taking seat:', error);
     }
   };
@@ -1269,7 +1268,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
             <img src={room.coverUrl || `https://picsum.photos/seed/${room.id}/100/100`} className="w-8 h-8 rounded-full border border-amber-500" />
             <div>
               <h2 className="text-sm font-bold truncate max-w-[120px]">{room.name}</h2>
-              <p className="text-[10px] text-neutral-400">ID: {room.id.slice(0, 6)}</p>
+              <p className="text-[10px] text-neutral-400">ID: {room.room_uid || room.id.slice(0, 8)}</p>
             </div>
           </div>
         </div>
@@ -1415,26 +1414,34 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
                     isOccupied ? "bg-transparent" : "bg-neutral-900/50 border-2 border-dashed border-neutral-800"
                   )}
                 >
-                  {isOccupied ? (
                     <div className="relative">
+                      {/* Speaking Visualizer Overlay */}
+                      {(() => {
+                        const isSpeaking = livekitService.getIsSpeaking(seat.user_id!);
+                        if (!isSpeaking) return null;
+                        return (
+                          <div className="absolute -inset-1 rounded-full border-2 border-amber-500 animate-ping opacity-75 z-0" />
+                        );
+                      })()}
                       <UserAvatar 
                         username={seat.user_id!} 
                         size="lg" 
                         className={cn(
-                          "border-2",
+                          "border-2 relative z-10",
                           getRoleColor(members.find(m => m.user_id === seat.user_id)?.role || (seat.user_id === room?.ownerId ? 'owner' : 'listener')).replace('text-', 'border-')
                         )} 
+                        src={members.find(m => m.user_id === seat.user_id)?.users?.avatar_url}
                       />
                       {/* Role Badge */}
                       {(() => {
                         const role = members.find(m => m.user_id === seat.user_id)?.role || (seat.user_id === room?.ownerId ? 'owner' : 'listener');
-                        if (role === 'owner') return <Crown className="absolute -top-2 -right-2 w-5 h-5 text-amber-500 drop-shadow-lg" />;
-                        if (role === 'admin') return <Shield className="absolute -top-2 -right-2 w-5 h-5 text-purple-500 drop-shadow-lg" />;
-                        if (role === 'moderator') return <Shield className="absolute -top-2 -right-2 w-5 h-5 text-blue-500 drop-shadow-lg" />;
+                        if (role === 'owner') return <Crown className="absolute -top-2 -right-2 w-5 h-5 text-amber-500 drop-shadow-lg z-20" />;
+                        if (role === 'admin') return <Shield className="absolute -top-2 -right-2 w-5 h-5 text-purple-500 drop-shadow-lg z-20" />;
+                        if (role === 'moderator') return <Shield className="absolute -top-2 -right-2 w-5 h-5 text-blue-500 drop-shadow-lg z-20" />;
                         return null;
                       })()}
                       {seat.is_muted && (
-                        <div className="absolute -bottom-1 -right-1 bg-red-500 p-1 rounded-full border border-neutral-950">
+                        <div className="absolute -bottom-1 -right-1 bg-red-500 p-1 rounded-full border border-neutral-950 z-20">
                           <MicOff className="w-3 h-3 text-white" />
                         </div>
                       )}
@@ -1454,7 +1461,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
                   )}
                 </motion.button>
                 <span className="text-[10px] font-bold text-neutral-400 truncate w-full text-center">
-                  {isOccupied ? seat.user_id?.slice(0, 8) : (room.seatNames?.[seatNum] || "فارغ")}
+                  {isOccupied ? (members.find(m => m.user_id === seat.user_id)?.users?.user_uid || seat.user_id?.slice(0, 8)) : (room.seatNames?.[seatNum] || "فارغ")}
                 </span>
               </div>
             );

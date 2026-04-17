@@ -18,7 +18,7 @@ const pusher = new Pusher({
   appId:   process.env.PUSHER_APP_ID   || '',
   key:     process.env.VITE_PUSHER_KEY || '',
   secret:  process.env.PUSHER_SECRET   || '',
-  cluster: process.env.VITE_PUSHER_CLUSTER || 'eu',
+  cluster: process.env.VITE_PUSHER_CLUSTER || 'mt1',
   useTLS:  true,
 });
 
@@ -77,6 +77,41 @@ app.use(express.urlencoded({ extended: true }));
 // ─── Health Check ─────────────────────────────────────────────────────────────
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
+// ─── LiveKit: Generate Token ──────────────────────────────────────────────────
+app.get("/api/livekit/token", authenticateJWT, async (req: any, res) => {
+  const { room: roomId, identity } = req.query;
+  const userId = req.user.id;
+  const username = req.user.user_metadata?.username || "مستخدم";
+
+  if (!roomId) return res.status(400).json({ error: "Missing room" });
+
+  const apiKey = process.env.LIVEKIT_API_KEY;
+  const apiSecret = process.env.LIVEKIT_API_SECRET;
+
+  if (!apiKey || !apiSecret) {
+    return res.status(500).json({ error: "LiveKit not configured" });
+  }
+
+  try {
+    const at = new AccessToken(apiKey, apiSecret, {
+      identity: userId,
+      name: username,
+    });
+
+    at.addGrant({
+      roomJoin: true,
+      room: roomId as string,
+      canPublish: true,
+      canSubscribe: true,
+    });
+
+    res.json({ token: await at.toJwt() });
+  } catch (e) {
+    console.error("LiveKit token failed:", e);
+    res.status(500).json({ error: "Failed to generate token" });
+  }
 });
 
 // ─── Pusher Auth ──────────────────────────────────────────────────────────────

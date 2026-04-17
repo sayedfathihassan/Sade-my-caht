@@ -93,6 +93,14 @@ class LiveKitService {
       this.room.localParticipant.setMicrophoneEnabled(!muted);
     }
   }
+
+  getIsSpeaking(identity: string): boolean {
+    if (!this.room) return false;
+    const participant = identity === this.room.localParticipant.identity 
+      ? this.room.localParticipant 
+      : this.room.participants.get(identity);
+    return participant?.isSpeaking || false;
+  }
 }
 
 export const livekitService = new LiveKitService();
