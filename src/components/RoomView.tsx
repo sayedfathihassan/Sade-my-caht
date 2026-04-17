@@ -248,59 +248,43 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
     
     const joinRoomAndFetchData = async () => {
       console.log('🚪 User entering room:', roomId);
-      
-      // UPSERT room_members
-      const { error: upsertError } = await supabase
-        .from('room_members')
-        .upsert([{
-          room_id: roomId,
-          user_id: user.id,
-          is_active: true
-        }]);
-      
-      if (upsertError) console.error('❌ Error joining room:', upsertError);
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
 
-      // Fetch users immediately
-      await fetchRoomUsers();
-      
-      // Update global member_count in rooms table
-      const { count: memberCount } = await supabase
-        .from('room_members')
-        .select('*', { count: 'exact', head: true })
-        .eq('room_id', roomId)
-        .eq('is_active', true);
-      
-      if (memberCount !== null) {
-        await supabase
-          .from('rooms')
-          .update({ member_count: memberCount })
-          .eq('id', roomId);
+        await fetch('/api/room/join', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ roomId })
+        });
+
+        // Fetch user profiles for current members
+        await fetchRoomUsers();
+      } catch (err) {
+        console.error('❌ Error joining room via API:', err);
       }
     };
 
     joinRoomAndFetchData();
 
     return () => {
-      supabase
-        .from('room_members')
-        .update({ is_active: false })
-        .eq('room_id', roomId)
-        .eq('user_id', user.id)
-        .then(async () => {
-          // Update member_count on exit
-          const { count: memberCount } = await supabase
-            .from('room_members')
-            .select('*', { count: 'exact', head: true })
-            .eq('room_id', roomId)
-            .eq('is_active', true);
-          
-          if (memberCount !== null) {
-            await supabase
-              .from('rooms')
-              .update({ member_count: memberCount })
-              .eq('id', roomId);
-          }
-        });
+      // Background leave call
+      supabase.auth.getSession().then(({ data: sessionData }) => {
+        const token = sessionData.session?.access_token;
+        if (token) {
+          fetch('/api/room/leave', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ roomId })
+          });
+        }
+      });
     };
   }, [user?.id, roomId]);
 
@@ -521,6 +505,16 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         notificationSound.current.currentTime = 0;
         notificationSound.current.play().catch(() => {});
       }
+    });
+
+    channel.bind('member-joined', (data: { userId: string, count: number }) => {
+      setRoom(prev => prev ? { ...prev, memberCount: data.count } : null);
+      if (isMembersListOpen) fetchRoomUsers();
+    });
+
+    channel.bind('member-left', (data: { userId: string, count: number }) => {
+      setRoom(prev => prev ? { ...prev, memberCount: data.count } : null);
+      if (isMembersListOpen) fetchRoomUsers();
     });
 
     channel.bind('clear-chat', () => {
@@ -757,11 +751,28 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         activeFrameId: user.activeFrameId
       };
 
+      // Clear input immediately for better UX (Optimistic)
+      const currentInput = content;
+      if (type === 'text') setChatInput("");
+
+      // Get session for Auth Header
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      if (!token && type !== 'system') {
+        console.error("No auth token found, cannot send message");
+        if (type === 'text') setChatInput(currentInput); // Restore on error
+        return;
+      }
+
       // Send via Pusher API
       console.log('📤 Sending message to server:', msgData.content);
       const res = await fetch('/api/room/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ 
           roomId, 
           message: msgData,
@@ -769,14 +780,18 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         })
       });
 
+      if (!res.ok) {
+        if (type === 'text') setChatInput(currentInput); // Restore on error
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to send message");
+      }
+
       const data = await res.json();
       console.log('📩 Message API response:', data);
       
       if (data.filtered) {
         console.warn('⚠️ Message was filtered by auto-mod');
       }
-
-      setChatInput("");
       
       if (type === 'text') {
         await taskService.updateTaskProgress(user.id, 'chat', 1);
@@ -789,9 +804,15 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
   const handleReaction = async (messageId: string, emoji: string) => {
     if (!user) return;
     try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
       await fetch('/api/room/react', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({ roomId, messageId, emoji, userId: user.id })
       });
     } catch (error) {
@@ -907,9 +928,15 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         .eq('room_id', roomId)
         .eq('user_id', targetUser.id);
       
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
       await fetch('/api/room/audit-log/add', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
         body: JSON.stringify({
           roomId,
           adminId: user.id,
@@ -941,15 +968,24 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         .single();
       
       if (data) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+
         await fetch('/api/room/warning', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({ roomId, warning: data })
         });
 
         await fetch('/api/room/audit-log/add', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({
             roomId,
             adminId: user.id,
@@ -974,9 +1010,15 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         .eq('user_id', targetUserId);
       
       if (!error) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+
         await fetch('/api/room/member/update', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({
             roomId,
             memberId: targetUserId,
@@ -986,7 +1028,10 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
 
         await fetch('/api/room/audit-log/add', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({
             roomId,
             adminId: user.id,
@@ -1024,9 +1069,15 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
           .eq('room_id', roomId)
           .eq('user_id', targetUserId);
 
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+
         await fetch('/api/room/audit-log/add', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({
             roomId,
             adminId: user.id,
@@ -1039,7 +1090,10 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         // Trigger settings update to notify others
         await fetch('/api/room/settings/update', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({ roomId, settings: { banned_users: newBanned } })
         });
 
@@ -1060,9 +1114,15 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         .eq('id', roomId);
       
       if (!error) {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+
         await fetch('/api/room/audit-log/add', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
           body: JSON.stringify({
             roomId,
             adminId: user.id,
@@ -1860,12 +1920,22 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         onPlay={async () => {
           if (!user) return false;
           try {
-            const { error } = await supabase
-              .from('users')
-              .update({ coins: user.coins - 100 })
-              .eq('id', user.id);
-            
-            if (error) throw error;
+            const { data: sessionData } = await supabase.auth.getSession();
+            const token = sessionData.session?.access_token;
+
+            const res = await fetch('/api/game/trivia/play', {
+              method: 'POST',
+              headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              }
+            });
+
+            if (!res.ok) {
+              const err = await res.json();
+              throw new Error(err.error || "فشل خصم العملات");
+            }
+
             await taskService.updateTaskProgress(user.id, 'game', 1);
             return true;
           } catch (error) {

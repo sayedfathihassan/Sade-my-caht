@@ -165,6 +165,69 @@ app.post("/api/room/chat", authenticateJWT, async (req: any, res) => {
   res.json({ success: true, filtered });
 });
 
+// ─── Room: Join Room (Secure) ────────────────────────────────────────────────
+app.post("/api/room/join", authenticateJWT, async (req: any, res) => {
+  const { roomId } = req.body;
+  const userId = req.user.id;
+
+  try {
+    // 1. Upsert membership
+    await supabaseAdmin.from('room_members').upsert({
+      room_id: roomId,
+      user_id: userId,
+      is_active: true
+    });
+
+    // 2. Count active members
+    const { count } = await supabaseAdmin
+      .from('room_members').select('*', { count: 'exact', head: true })
+      .eq('room_id', roomId).eq('is_active', true);
+
+    // 3. Update room member count
+    await supabaseAdmin.from('rooms').update({ member_count: count || 0 }).eq('id', roomId);
+
+    // 4. Notify room
+    await pusher.trigger(`room-${roomId}`, "member-joined", { 
+      userId, 
+      count: count || 0 
+    });
+
+    res.json({ success: true, count });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Room: Leave Room (Secure) ───────────────────────────────────────────────
+app.post("/api/room/leave", authenticateJWT, async (req: any, res) => {
+  const { roomId } = req.body;
+  const userId = req.user.id;
+
+  try {
+    // 1. Deactivate membership
+    await supabaseAdmin.from('room_members').update({ is_active: false })
+      .eq('room_id', roomId).eq('user_id', userId);
+
+    // 2. Count active members
+    const { count } = await supabaseAdmin
+      .from('room_members').select('*', { count: 'exact', head: true })
+      .eq('room_id', roomId).eq('is_active', true);
+
+    // 3. Update room member count
+    await supabaseAdmin.from('rooms').update({ member_count: count || 0 }).eq('id', roomId);
+
+    // 4. Notify room
+    await pusher.trigger(`room-${roomId}`, "member-left", { 
+      userId, 
+      count: count || 0 
+    });
+
+    res.json({ success: true, count });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Room: React to Message ───────────────────────────────────────────────────
 app.post("/api/room/react", authenticateJWT, async (req: any, res) => {
   const { roomId, messageId, emoji } = req.body;
@@ -313,6 +376,29 @@ app.post("/api/game/wheel/spin", authenticateJWT, async (req: any, res) => {
   } catch (err: any) {
     console.error('Wheel spin error:', err);
     res.status(500).json({ error: "حدث خطأ أثناء تشغيل العجلة" });
+  }
+});
+
+// ─── Game: Trivia Play (Secure Deduction) ────────────────────────────────────
+app.post("/api/game/trivia/play", authenticateJWT, async (req: any, res) => {
+  const userId = req.user.id;
+  const COST = 100;
+
+  try {
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users').select('coins').eq('id', userId).single();
+    
+    if (userError || !user) throw new Error("المستخدم غير موجود");
+    if (user.coins < COST) return res.status(400).json({ error: "رصيد غير كافٍ" });
+
+    const { error: updateError } = await supabaseAdmin
+      .from('users').update({ coins: user.coins - COST }).eq('id', userId);
+
+    if (updateError) throw updateError;
+
+    res.json({ success: true, newBalance: user.coins - COST });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
