@@ -16,8 +16,10 @@ export const storeService = {
   },
 
   subscribeToItems(callback: (items: StoreItem[]) => void) {
+    // Use a unique channel name on each call to prevent conflicts between Store and Inventory
+    const channelName = `store_items_changes_${Math.random().toString(36).slice(2)}`;
     const subscription = supabase
-      .channel('store_items_changes')
+      .channel(channelName)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'store_items' }, () => {
         this.getItems().then(callback);
       })

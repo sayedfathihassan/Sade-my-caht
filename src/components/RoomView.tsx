@@ -36,7 +36,7 @@ interface RoomViewProps {
 }
 
 export function RoomView({ roomId, onExit }: RoomViewProps) {
-  const { user, supabaseUser } = useAuth();
+  const { user, supabaseUser, refreshUser } = useAuth();
   const [room, setRoom] = useState<Room | null>(null);
   const [seats, setSeats] = useState<Seat[]>([]);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -153,14 +153,21 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
     notificationSound.current.volume = 0.3;
   }, []);
 
-  // XP System
+  // XP System - runs every minute while in room
+  const userRef = useRef(user);
   useEffect(() => {
-    if (!user) return;
+    userRef.current = user;
+  }, [user]);
+
+  useEffect(() => {
+    if (!user?.id) return;
     const interval = setInterval(async () => {
+      const currentUser = userRef.current;
+      if (!currentUser) return;
       try {
-        const newXp = (user.xp || 0) + 10;
-        let newLevel = user.level || 1;
-        let nextXp = user.nextLevelXp || 100;
+        const newXp = (currentUser.xp || 0) + 10;
+        let newLevel = currentUser.level || 1;
+        let nextXp = currentUser.nextLevelXp || 100;
 
         if (newXp >= nextXp) {
           newLevel += 1;
@@ -175,22 +182,50 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
             level: newLevel,
             next_level_xp: nextXp
           })
-          .eq('id', user.id);
-
-        await taskService.updateTaskProgress(user.id, 'time', 1);
+          .eq('id', currentUser.id);
       } catch (e) {
         console.error("XP update failed", e);
       }
     }, 60000);
 
     return () => clearInterval(interval);
-  }, [user?.id]);
+  }, [user?.id]); // Only re-run when user ID changes, not on every user update
 
-  // Task: Mic Time
+  // Task: Room Time - runs every minute independently (مهمة الوقت في الغرفة)
   useEffect(() => {
-    if (!user || onSeat === null || isMuted) return;
-    const interval = setInterval(() => {
-      taskService.updateTaskProgress(user.id, 'mic', 1);
+    if (!user?.id) return;
+    console.log('⏱️ Starting room time task tracker for user:', user.id);
+    const interval = setInterval(async () => {
+      const currentUser = userRef.current;
+      if (!currentUser) return;
+      console.log('⏱️ Updating time task progress...');
+      try {
+        await taskService.updateTaskProgress(currentUser.id, 'time', 1);
+        console.log('✅ Time task progress updated');
+      } catch (e) {
+        console.error('❌ Failed to update time task:', e);
+      }
+    }, 60000); // Every 1 minute
+
+    return () => {
+      console.log('⏹️ Clearing room time task tracker');
+      clearInterval(interval);
+    };
+  }, [user?.id]); // CRITICAL: Only depend on user.id, not the full user object
+
+  // Task: Mic Time - only when seated and unmuted
+  useEffect(() => {
+    if (!user?.id || onSeat === null || isMuted) return;
+    console.log('🎤 Starting mic time task tracker');
+    const interval = setInterval(async () => {
+      const currentUser = userRef.current;
+      if (!currentUser) return;
+      try {
+        await taskService.updateTaskProgress(currentUser.id, 'mic', 1);
+        console.log('✅ Mic task progress updated');
+      } catch (e) {
+        console.error('❌ Failed to update mic task:', e);
+      }
     }, 60000);
     return () => clearInterval(interval);
   }, [user?.id, onSeat, isMuted]);
@@ -206,6 +241,28 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
           user_id: user.id,
           is_active: true
         }]);
+      
+      // Update member_count in rooms table
+      const { data: activeMembers } = await supabase
+        .from('room_members')
+        .select('id', { count: 'exact', head: true })
+        .eq('room_id', roomId)
+        .eq('is_active', true);
+      
+      const count = (activeMembers as any)?.length ?? 0;
+      // Use count query instead
+      const { count: memberCount } = await supabase
+        .from('room_members')
+        .select('*', { count: 'exact', head: true })
+        .eq('room_id', roomId)
+        .eq('is_active', true);
+      
+      if (memberCount !== null) {
+        await supabase
+          .from('rooms')
+          .update({ member_count: memberCount })
+          .eq('id', roomId);
+      }
     };
 
     joinRoom();
@@ -216,7 +273,21 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         .update({ is_active: false })
         .eq('room_id', roomId)
         .eq('user_id', user.id)
-        .then();
+        .then(async () => {
+          // Update member_count on exit
+          const { count: memberCount } = await supabase
+            .from('room_members')
+            .select('*', { count: 'exact', head: true })
+            .eq('room_id', roomId)
+            .eq('is_active', true);
+          
+          if (memberCount !== null) {
+            await supabase
+              .from('rooms')
+              .update({ member_count: memberCount })
+              .eq('id', roomId);
+          }
+        });
     };
   }, [user?.id, roomId]);
 
@@ -488,7 +559,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
 
     channel.bind('member-updated', (data: { memberId: string, updates: any }) => {
       setMembers(prev => prev.map(m => 
-        m.userId === data.memberId ? { ...m, ...data.updates } : m
+        m.user_id === data.memberId ? { ...m, ...data.updates } : m
       ));
     });
 
@@ -501,8 +572,8 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
       setStaffMessages(prev => [...prev, data.message]);
     });
 
-    channel.bind('user-warning', (data: { warning: RoomWarning }) => {
-      if (data.warning.userId === user?.id) {
+    channel.bind('user-warning', (data: { warning: any }) => {
+      if (data.warning.user_id === user?.id) {
         setActiveWarning(data.warning);
       }
     });
@@ -625,9 +696,9 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
     }
 
     try {
-      // Shadow Ban Check
-      const myMember = members.find(m => m.userId === user.id);
-      if (myMember?.isShadowBanned && type === 'text') {
+      // Shadow Ban Check - DB uses user_id (snake_case)
+      const myMember = members.find(m => m.user_id === user.id);
+      if (myMember?.is_shadow_banned && type === 'text') {
         // Only show to self
         const fakeMsg: ChatMessage = {
           id: Math.random().toString(36).slice(2),
@@ -1180,7 +1251,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
             className="flex items-center gap-1.5 bg-neutral-900/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10"
           >
             <Users className="w-4 h-4 text-amber-500" />
-            <span className="text-xs font-bold">{formatNumber(room.memberCount)}</span>
+            <span className="text-xs font-bold">{formatNumber(members.filter(m => m.is_active !== false).length || room.memberCount)}</span>
           </button>
           {(user?.id === room.ownerId || user?.email === 'sayed.fayhi@gmail.com' || myRole === 'admin' || myRole === 'moderator' || myRole === 'observer') && (
             <button 
@@ -1477,7 +1548,10 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
             </button>
 
             <button
-              onClick={() => setIsGiftPanelOpen(true)}
+              onClick={async () => {
+                await refreshUser(); // تحديث الرصيد من DB قبل فتح لوحة الهدايا
+                setIsGiftPanelOpen(true);
+              }}
               className="w-10 h-10 md:w-12 md:h-12 bg-gradient-to-br from-red-500 to-rose-600 rounded-xl md:rounded-2xl flex items-center justify-center shadow-lg shadow-red-500/20 shrink-0"
             >
               <Gift className="w-5 h-5 md:w-6 md:h-6 text-white" />
@@ -1535,7 +1609,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
               <span>قل مرحباً</span>
             </button>
 
-            {onSeat !== null && (
+            {onSeat !== null ? (
               <button
                 onClick={toggleMute}
                 className={cn(
@@ -1544,6 +1618,20 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
                 )}
               >
                 {isMuted ? <MicOff className="w-5 h-5 md:w-6 md:h-6" /> : <Mic className="w-5 h-5 md:w-6 md:h-6" />}
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  const emptySeatIdx = Array.from({ length: 6 }).findIndex(
+                    (_, i) => !seats.find(s => s.number === (i + 1) && s.user_id)
+                  );
+                  if (emptySeatIdx >= 0) handleTakeSeat(emptySeatIdx + 1);
+                  else alert("لا توجد مقاعد فارغة حالياً");
+                }}
+                className="w-10 h-10 md:w-12 md:h-12 bg-neutral-800/50 rounded-xl md:rounded-2xl flex items-center justify-center border border-neutral-700 text-neutral-500 shrink-0"
+                title="اضغط لأخذ مقعد"
+              >
+                <Mic className="w-5 h-5 md:w-6 md:h-6" />
               </button>
             )}
             
@@ -1589,6 +1677,8 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
             if (!response.ok) throw new Error(result.error || "فشل إلقاء الصندوق");
 
             setIsGiftPanelOpen(false);
+            // Count lucky box as a gift task
+            if (user) await taskService.updateTaskProgress(user.id, 'gift', 1);
           } catch (error) {
             console.error("Failed to drop lucky box", error);
             alert("حدث خطأ أثناء رمي الصندوق");
