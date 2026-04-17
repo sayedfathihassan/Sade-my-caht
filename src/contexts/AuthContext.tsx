@@ -16,7 +16,6 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Helper: Generate a unique numeric UID for new users (6-9 digits)
 const generateUid = (): string => {
-  // Generate a random number between 100000 and 999999999
   const min = 100000;
   const max = 999999999;
   return Math.floor(Math.random() * (max - min + 1) + min).toString();
@@ -24,7 +23,6 @@ const generateUid = (): string => {
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [supabaseUser, setSupabaseUser] = useState<SupabaseUser | null>(null);
-  // ✅ FIX: Start with null - no fake guest data
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -49,7 +47,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     inventory: data.inventory || [],
     isVerified: data.is_verified ?? false,
     isBanned: data.is_banned ?? false,
-    // ✅ FIX: Role and super admin come from DB, not hardcoded email checks
     role: data.role ?? 'user',
     isSuperAdmin: data.is_super_admin ?? false,
     userUid: data.user_uid,
@@ -60,8 +57,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     lastActiveAt: data.last_active_at ?? new Date().toISOString(),
   });
 
-  // ✅ Fetch / create user profile from DB (Internal call)
-
+  // ✅ Fetch / create user profile from DB (Ensured single declaration)
   const fetchProfile = async (sUser: SupabaseUser) => {
     console.log('🔄 Starting fetchProfile for user:', sUser.id);
     try {
@@ -120,10 +116,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           .select()
           .single();
 
-        if (createError) {
-          console.error('❌ Error creating profile:', createError);
-          throw createError;
-        }
+        if (createError) throw createError;
         console.log('✅ Profile created and loaded');
         setUser(mapSupabaseUser(createdData));
       } else if (data) {
@@ -139,14 +132,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(mapSupabaseUser(data));
 
         // Background update: don't await to avoid blocking UI entrance
-        console.log('⏱ Updating last_active_at in background...');
         supabase
           .from('users')
           .update({ last_active_at: new Date().toISOString() })
           .eq('id', sUser.id)
           .then(({ error: updateError }) => {
-            if (updateError) console.error('⚠️ Failed to update last active timestamp:', updateError);
-            else console.log('✅ Last active timestamp updated');
+            if (updateError) console.error('⚠️ Failed to update last active:', updateError);
           });
           
       } else if (error) {
@@ -173,15 +164,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     console.log('🔑 Initializing Auth Listener...');
     
-    // Standard safety timeout just in case
     const authTimer = setTimeout(() => {
-      if (loading) setLoading(false);
+      if (loading) {
+        console.warn('Auth state check timed out. Forcing stop loading...');
+        setLoading(false);
+      }
     }, 15000);
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('🔔 Auth state changed:', event, session?.user?.id);
-        
         setSupabaseUser(session?.user ?? null);
         
         if (session?.user) {
@@ -198,17 +190,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Initial session check
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
-        console.log('📡 Existing session found:', session.user.id);
         setSupabaseUser(session.user);
         fetchProfile(session.user);
       } else {
-        console.log('📡 No existing session');
         setLoading(false);
       }
     });
 
     return () => {
-      console.log('🔌 Cleaning up Auth Listener');
       subscription.unsubscribe();
       clearTimeout(authTimer);
     };
@@ -242,36 +231,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [user?.id]);
 
-
-
   const signInWithUsername = async (username: string, password: string, isSignUp: boolean, nickname?: string) => {
-    // Generate internal fake email
     const fakeEmail = `${username.toLowerCase().trim()}@sada.local`;
 
     if (isSignUp) {
       if (!nickname) throw new Error("الاسم المستعار مطلوب للتسجيل");
-      
-      const { data, error } = await supabase.auth.signUp({ 
+      const { error } = await supabase.auth.signUp({ 
         email: fakeEmail, 
         password,
-        options: {
-          data: {
-            nickname: nickname,
-            login_name: username.trim()
-          }
-        }
+        options: { data: { nickname, login_name: username.trim() } }
       });
-      
       if (error) throw error;
-      
-      // If registration succeeded but session is null (e.g. needs confirmation), 
-      // we still treat it as success for the UI.
       return { success: true, isSignUp: true };
     } else {
-      const { data, error } = await supabase.auth.signInWithPassword({ 
-        email: fakeEmail, 
-        password 
-      });
+      const { error } = await supabase.auth.signInWithPassword({ email: fakeEmail, password });
       if (error) throw error;
       return { success: true, isSignUp: false };
     }
