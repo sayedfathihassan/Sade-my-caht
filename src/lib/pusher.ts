@@ -1,7 +1,7 @@
 import Pusher from 'pusher-js';
 
 const pusherKey = import.meta.env.VITE_PUSHER_KEY;
-const pusherCluster = import.meta.env.VITE_PUSHER_CLUSTER || 'mt1';
+const pusherCluster = import.meta.env.VITE_PUSHER_CLUSTER || 'eu';
 
 if (!pusherKey) {
   console.warn('Pusher key missing. Please check your environment variables.');

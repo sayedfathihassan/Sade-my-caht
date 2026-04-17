@@ -647,8 +647,18 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         .eq('is_active', true);
       
       if (data) {
-        setMembers(data);
-        setRoomUsers(data.map(m => ({
+        // Map to standard camelCase for the UI
+        const mappedMembers = data.map(m => ({
+          ...m,
+          userId: m.user_id,
+          isActive: m.is_active,
+          isShadowBanned: m.is_shadow_banned,
+          isStealth: m.is_stealth,
+          joinedAt: m.joined_at
+        }));
+        
+        setMembers(mappedMembers);
+        setRoomUsers(mappedMembers.map(m => ({
           id: m.users?.id,
           username: m.users?.username || 'مستخدم',
           avatarUrl: m.users?.avatar_url
@@ -1270,7 +1280,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
             className="flex items-center gap-1.5 bg-neutral-900/50 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/10"
           >
             <Users className="w-4 h-4 text-amber-500" />
-            <span className="text-xs font-bold">{formatNumber(members.filter(m => m.is_active !== false).length || room.memberCount)}</span>
+            <span className="text-xs font-bold">{formatNumber(members.length || room.memberCount)}</span>
           </button>
           {(user?.id === room.ownerId || user?.email === 'sayed.fayhi@gmail.com' || myRole === 'admin' || myRole === 'moderator' || myRole === 'observer') && (
             <button 
