@@ -289,26 +289,70 @@ export function RoomAdminPanel({ isOpen, onClose, room, seats, userRole }: RoomA
     }
   };
 
-  const toggleSeatLock = async (seatId: string, currentLocked: boolean) => {
-    await supabase
-      .from('seats')
-      .update({ is_locked: !currentLocked })
-      .eq('id', seatId);
+  const toggleSeatLock = async (seatNumber: number, currentLocked: boolean) => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+      
+      await fetch('/api/room/seat/toggle', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ 
+          roomId: room.id, 
+          seatNumber, 
+          action: currentLocked ? 'unlock' : 'lock' 
+        })
+      });
+    } catch (error) {
+      console.error("Failed to toggle seat lock", error);
+    }
   };
 
-  const toggleSeatMute = async (seatId: string, currentMuted: boolean) => {
-    await supabase
-      .from('seats')
-      .update({ is_muted: !currentMuted })
-      .eq('id', seatId);
+  const toggleSeatMute = async (seatNumber: number, currentMuted: boolean) => {
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      await fetch('/api/room/seat/toggle', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ 
+          roomId: room.id, 
+          seatNumber, 
+          action: currentMuted ? 'unmute' : 'mute' 
+        })
+      });
+    } catch (error) {
+      console.error("Failed to toggle seat mute", error);
+    }
   };
 
   const handleMuteAll = async () => {
     try {
-      await supabase
-        .from('seats')
-        .update({ is_muted: true })
-        .eq('room_id', room.id);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      // Group actions are better handled by looping through seats on the server 
+      // or a dedicated 'all' endpoint. For simplicity, we can loop here or add a parameter.
+      // Let's call the server for each seat to ensure Pusher triggers correctly for each.
+      for (const seat of seats) {
+        if (!seat.is_muted) {
+          await fetch('/api/room/seat/toggle', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ roomId: room.id, seatNumber: seat.number, action: 'mute' })
+          });
+        }
+      }
     } catch (error) {
       console.error("Failed to mute all seats", error);
     }
@@ -316,10 +360,21 @@ export function RoomAdminPanel({ isOpen, onClose, room, seats, userRole }: RoomA
 
   const handleLockAll = async () => {
     try {
-      await supabase
-        .from('seats')
-        .update({ is_locked: true })
-        .eq('room_id', room.id);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      for (const seat of seats) {
+        if (!seat.is_locked) {
+          await fetch('/api/room/seat/toggle', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ roomId: room.id, seatNumber: seat.number, action: 'lock' })
+          });
+        }
+      }
     } catch (error) {
       console.error("Failed to lock all seats", error);
     }
@@ -327,10 +382,21 @@ export function RoomAdminPanel({ isOpen, onClose, room, seats, userRole }: RoomA
 
   const handleUnlockAll = async () => {
     try {
-      await supabase
-        .from('seats')
-        .update({ is_locked: false })
-        .eq('room_id', room.id);
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      for (const seat of seats) {
+        if (seat.is_locked) {
+          await fetch('/api/room/seat/toggle', {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
+            },
+            body: JSON.stringify({ roomId: room.id, seatNumber: seat.number, action: 'unlock' })
+          });
+        }
+      }
     } catch (error) {
       console.error("Failed to unlock all seats", error);
     }
@@ -840,24 +906,24 @@ export function RoomAdminPanel({ isOpen, onClose, room, seats, userRole }: RoomA
                           </div>
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => toggleSeatMute(seat.id, seat.isMuted)}
+                              onClick={() => toggleSeatMute(seat.number, seat.is_muted)}
                               className={cn(
                                 "p-2 rounded-xl transition-all",
-                                seat.isMuted ? "bg-red-500 text-white" : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"
+                                seat.is_muted ? "bg-red-500 text-white" : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"
                               )}
-                              title={seat.isMuted ? "إلغاء الكتم" : "كتم المايك"}
+                              title={seat.is_muted ? "إلغاء الكتم" : "كتم المايك"}
                             >
                               <MicOff className="w-4 h-4" />
                             </button>
                             <button
-                              onClick={() => toggleSeatLock(seat.id, seat.isLocked)}
+                              onClick={() => toggleSeatLock(seat.number, seat.is_locked)}
                               className={cn(
                                 "p-2 rounded-xl transition-all",
-                                seat.isLocked ? "bg-amber-500 text-black" : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"
+                                seat.is_locked ? "bg-amber-500 text-black" : "bg-neutral-800 text-neutral-400 hover:bg-neutral-700"
                               )}
-                              title={seat.isLocked ? "فتح المقعد" : "قفل المقعد"}
+                              title={seat.is_locked ? "فتح المقعد" : "قفل المقعد"}
                             >
-                              {seat.isLocked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                              {seat.is_locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
                             </button>
                           </div>
                         </div>

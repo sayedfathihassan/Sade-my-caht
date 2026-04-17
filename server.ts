@@ -237,7 +237,147 @@ app.post("/api/room/react", authenticateJWT, async (req: any, res) => {
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: "Pusher failed" }); }
 });
- 
+
+// ─── Room: Seat Management (Secure) ───────────────────────────────────────────
+app.post("/api/room/seat/take", authenticateJWT, async (req: any, res) => {
+  const { roomId, seatNumber } = req.body;
+  const userId = req.user.id;
+
+  try {
+    // 1. Check if seat is already occupied or locked
+    const { data: seat, error: seatError } = await supabaseAdmin
+      .from('seats')
+      .select('*')
+      .eq('room_id', roomId)
+      .eq('number', seatNumber)
+      .single();
+
+    if (seatError || !seat) return res.status(404).json({ error: "المقعد غير موجود" });
+    if (seat.user_id) return res.status(400).json({ error: "المقعد محجوز بالفعل" });
+    if (seat.is_locked) return res.status(403).json({ error: "هذا المقعد مغلق حالياً" });
+
+    // 2. Check if user is already on another seat in this room
+    const { data: existingSeat } = await supabaseAdmin
+      .from('seats')
+      .select('number')
+      .eq('room_id', roomId)
+      .eq('user_id', userId)
+      .single();
+    
+    if (existingSeat) return res.status(400).json({ error: "أنت تجلس بالفعل على مقعد آخر" });
+
+    // 3. Take the seat using Admin client to bypass RLS
+    const { data: newSeat, error: updateError } = await supabaseAdmin
+      .from('seats')
+      .update({
+        user_id: userId,
+        joined_at: new Date().toISOString(),
+        last_activity_at: new Date().toISOString()
+      })
+      .eq('id', seat.id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    // 4. Notify everyone in the room
+    await pusher.trigger(`room-${roomId}`, "seat-updated", { 
+      type: 'take',
+      seat: newSeat 
+    });
+
+    res.json({ success: true, seat: newSeat });
+  } catch (err: any) {
+    console.error('Seat take error:', err);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/room/seat/leave", authenticateJWT, async (req: any, res) => {
+  const { roomId, seatNumber } = req.body;
+  const userId = req.user.id;
+
+  try {
+    const { data: seat, error: seatError } = await supabaseAdmin
+      .from('seats')
+      .select('*')
+      .eq('room_id', roomId)
+      .eq('number', seatNumber)
+      .single();
+
+    if (seatError || !seat) return res.status(404).json({ error: "المقعد غير موجود" });
+    
+    // Only the user on the seat or an admin can free the seat
+    const { data: member } = await supabaseAdmin
+      .from('room_members').select('role').eq('room_id', roomId).eq('user_id', userId).single();
+    
+    const isOwnerOrAdmin = ['owner', 'admin', 'moderator'].includes(member?.role);
+    if (seat.user_id !== userId && !isOwnerOrAdmin) {
+      return res.status(403).json({ error: "ليس لديك صلاحية سحب المايك من هذا المستخدم" });
+    }
+
+    const { data: updatedSeat, error: updateError } = await supabaseAdmin
+      .from('seats')
+      .update({
+        user_id: null,
+        joined_at: null,
+        is_muted: false // Reset mute when leaving
+      })
+      .eq('id', seat.id)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    await pusher.trigger(`room-${roomId}`, "seat-updated", { 
+      type: 'leave',
+      seat: updatedSeat 
+    });
+
+    res.json({ success: true, seat: updatedSeat });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+app.post("/api/room/seat/toggle", authenticateJWT, async (req: any, res) => {
+  const { roomId, seatNumber, action } = req.body; // action: 'lock', 'unlock', 'mute', 'unmute'
+  const userId = req.user.id;
+
+  try {
+    const { data: member } = await supabaseAdmin
+      .from('room_members').select('role').eq('room_id', roomId).eq('user_id', userId).single();
+    if (!['owner', 'admin', 'moderator'].includes(member?.role)) {
+      return res.status(403).json({ error: "ليس لديك صلاحية إدارة المقاعد" });
+    }
+
+    let updates: any = {};
+    if (action === 'lock') updates.is_locked = true;
+    if (action === 'unlock') updates.is_locked = false;
+    if (action === 'mute') updates.is_muted = true;
+    if (action === 'unmute') updates.is_muted = false;
+
+    const { data: updatedSeat, error: updateError } = await supabaseAdmin
+      .from('seats')
+      .update(updates)
+      .eq('room_id', roomId)
+      .eq('number', seatNumber)
+      .select()
+      .single();
+
+    if (updateError) throw updateError;
+
+    await pusher.trigger(`room-${roomId}`, "seat-updated", { 
+      type: 'toggle',
+      seat: updatedSeat 
+    });
+
+    res.json({ success: true, seat: updatedSeat });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ─── Room: Create Room (Secure Transaction - 900 Coins) ───────────────────────
 app.post("/api/room/create", authenticateJWT, async (req: any, res) => {
   const { name, type } = req.body;
@@ -567,6 +707,19 @@ app.post("/api/room/gift", authenticateJWT, async (req: any, res) => {
       .from('users').update({ coins: user.coins - cost }).eq('id', userId);
     if (deductError) throw new Error("فشل خصم الرصيد");
 
+    // Add XP to sender (1 XP per 10 coins spent)
+    const xpGain = Math.floor(cost / 10) || 1;
+    const { data: senderProfile } = await supabaseAdmin.from('users').select('xp, level').eq('id', userId).single();
+    if (senderProfile) {
+      const newXp = (senderProfile.xp || 0) + xpGain;
+      const nextLevelXp = (senderProfile.level || 1) * 1000;
+      let newLevel = senderProfile.level || 1;
+      if (newXp >= nextLevelXp) {
+        newLevel += 1;
+      }
+      await supabaseAdmin.from('users').update({ xp: newXp, level: newLevel }).eq('id', userId);
+    }
+
     // Add 10% of the cost to the recipient
     if (recipientId && recipientId !== userId) {
       const cashback = Math.floor(cost * 0.10);
@@ -621,6 +774,17 @@ app.post("/api/room/lucky-box", authenticateJWT, async (req: any, res) => {
     const { error: deductError } = await supabaseAdmin
       .from('users').update({ coins: user.coins - totalAmount }).eq('id', userId);
     if (deductError) throw new Error("فشل خصم الرصيد");
+
+    // Add XP for dropping lucky box (1 XP per 5 coins)
+    const luckyXp = Math.floor(totalAmount / 5) || 10;
+    const { data: profile } = await supabaseAdmin.from('users').select('xp, level').eq('id', userId).single();
+    if (profile) {
+      const newXp = (profile.xp || 0) + luckyXp;
+      const nextLevelXp = (profile.level || 1) * 1000;
+      let newLevel = profile.level || 1;
+      if (newXp >= nextLevelXp) newLevel += 1;
+      await supabaseAdmin.from('users').update({ xp: newXp, level: newLevel }).eq('id', userId);
+    }
 
     // Create Lucky Box in DB
     const { data: luckyBox, error: boxError } = await supabaseAdmin
@@ -704,6 +868,17 @@ app.post("/api/store/purchase", authenticateJWT, async (req: any, res) => {
       .update({ [currency]: user[currency] - item.price })
       .eq('id', userId);
     if (balanceError) throw balanceError;
+
+    // Add XP for purchase (1 XP per 2 coins/diamonds)
+    const purchaseXp = Math.floor(item.price / 2) || 5;
+    const { data: pProfile } = await supabaseAdmin.from('users').select('xp, level').eq('id', userId).single();
+    if (pProfile) {
+      const newXp = (pProfile.xp || 0) + purchaseXp;
+      const nextLevelXp = (pProfile.level || 1) * 1000;
+      let newLevel = pProfile.level || 1;
+      if (newXp >= nextLevelXp) newLevel += 1;
+      await supabaseAdmin.from('users').update({ xp: newXp, level: newLevel }).eq('id', userId);
+    }
 
     // Add to user_inventory table (dedicated table)
     const { error: inventoryError } = await supabaseAdmin

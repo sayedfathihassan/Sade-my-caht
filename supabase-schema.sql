@@ -789,15 +789,80 @@ CREATE TRIGGER on_user_create_uid
 
 -- Trigger for Rooms
 CREATE OR REPLACE FUNCTION handle_room_uid() RETURNS TRIGGER AS $$
+BEGIN IF NEW.room_uid IS NULL THEN NEW.room_uid := generate_unique_uid('rooms', 'room_uid'); END IF; RETURN NEW; END; $$ LANGUAGE plpgsql;
+DROP TRIGGER IF EXISTS on_room_create_uid ON rooms;
+CREATE TRIGGER on_room_create_uid BEFORE INSERT ON rooms FOR EACH ROW EXECUTE FUNCTION handle_room_uid();
+
+-- 7. Lucky Box Claim System
+-- p_box_id: UUID of the lucky box
+-- p_user_id: UUID of the claiming user
+-- RETURNS: Amount won or 0 if failed
+CREATE OR REPLACE FUNCTION claim_lucky_box(p_box_id UUID, p_user_id UUID)
+RETURNS INT
+LANGUAGE plpgsql
+SECURITY DEFINER
+AS $$
+DECLARE
+  v_total_amount INT;
+  v_remaining_amount INT;
+  v_total_winners INT;
+  v_current_winners_count INT;
+  v_winners_list TEXT[];
+  v_win_amount INT;
+  v_status TEXT;
 BEGIN
-  IF NEW.room_uid IS NULL THEN
-    NEW.room_uid := generate_unique_uid('rooms', 'room_uid');
+  -- 1. Get box details with FOR UPDATE to prevent race conditions
+  SELECT total_amount, remaining_amount, total_winners, winners, status
+  INTO v_total_amount, v_remaining_amount, v_total_winners, v_winners_list, v_status
+  FROM lucky_boxes
+  WHERE id = p_box_id
+  FOR UPDATE;
+
+  -- 2. Validation
+  IF v_status != 'active' THEN
+    RETURN 0;
   END IF;
-  RETURN NEW;
+
+  IF v_winners_list @> ARRAY[p_user_id::TEXT] THEN
+    RETURN 0; -- Already claimed
+  END IF;
+
+  v_current_winners_count := array_length(v_winners_list, 1);
+  IF v_current_winners_count IS NULL THEN v_current_winners_count := 0; END IF;
+
+  IF v_current_winners_count >= v_total_winners THEN
+    RETURN 0; -- No spots left
+  END IF;
+
+  -- 3. Calculate win amount
+  -- If it's the last winner, they get the remainder
+  IF v_current_winners_count = v_total_winners - 1 THEN
+    v_win_amount := v_remaining_amount;
+  ELSE
+    -- Fair random share (approximate)
+    v_win_amount := floor(random() * (v_remaining_amount / (v_total_winners - v_current_winners_count) * 2));
+    if v_win_amount < 1 THEN v_win_amount := 1; END IF;
+    if v_win_amount > v_remaining_amount THEN v_win_amount := v_remaining_amount; END IF;
+  END IF;
+
+  -- 4. Update Lucky Box
+  UPDATE lucky_boxes
+  SET 
+    remaining_amount = v_remaining_amount - v_win_amount,
+    winners = array_append(v_winners_list, p_user_id::TEXT),
+    status = CASE WHEN v_current_winners_count + 1 >= v_total_winners THEN 'distributed' ELSE 'active' END
+  WHERE id = p_box_id;
+
+  -- 5. Update User Balance
+  UPDATE users
+  SET coins = coins + v_win_amount
+  WHERE id = p_user_id;
+
+  -- 6. Log if status changed to distributed
+  IF v_current_winners_count + 1 >= v_total_winners THEN
+    UPDATE rooms SET active_lucky_box_id = NULL WHERE active_lucky_box_id = p_box_id;
+  END IF;
+
+  RETURN v_win_amount;
 END;
-$$ LANGUAGE plpgsql;
-
-CREATE TRIGGER on_room_create_uid
-  BEFORE INSERT ON rooms
-  FOR EACH ROW EXECUTE FUNCTION handle_room_uid();
-
+$$;

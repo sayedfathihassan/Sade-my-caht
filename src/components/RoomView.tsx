@@ -108,6 +108,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
   const [chatInput, setChatInput] = useState("");
   const [activePKChallenge, setActivePKChallenge] = useState<PKChallenge | null>(null);
   const [activeLuckyBox, setActiveLuckyBox] = useState<LuckyBox | null>(null);
+  const [activeGiftAnimation, setActiveGiftAnimation] = useState<{gift: any, sender: string, recipient: string} | null>(null);
   const [pkUser1, setPkUser1] = useState<User | null>(null);
   const [pkUser2, setPkUser2] = useState<User | null>(null);
   const [isMuted, setIsMuted] = useState(true);
@@ -501,6 +502,19 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
     channel.bind('new-message', (data: { message: ChatMessage }) => {
       console.log('📩 New message received via Pusher:', data.message.content);
       setMessages(prev => [...prev, data.message]);
+
+      // Gift Animation Trigger
+      if (data.message.type === 'gift') {
+        const giftId = data.message.content.split(' ')[1]; // Elementary parse
+        // Or cleaner: the server could send giftId in meta
+        setActiveGiftAnimation({
+          gift: { name: 'هدية', icon: '🎁' }, // Fallback
+          sender: data.message.username,
+          recipient: data.message.content.split(' إلى ')[1] || 'الجميع'
+        });
+        setTimeout(() => setActiveGiftAnimation(null), 5000);
+      }
+
       if (notificationSound.current) {
         notificationSound.current.currentTime = 0;
         notificationSound.current.play().catch(() => {});
@@ -630,6 +644,38 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         }
         return msg;
       }));
+    });
+
+    channel.bind('seat-updated', (data: { type: string, seat: Seat }) => {
+      console.log('🪑 Seat update via Pusher:', data.type, data.seat);
+      setSeats(prev => {
+        const index = prev.findIndex(s => s.id === data.seat.id);
+        if (index !== -1) {
+          const newSeats = [...prev];
+          newSeats[index] = data.seat;
+          return newSeats;
+        }
+        return [...prev, data.seat].sort((a, b) => a.number - b.number);
+      });
+
+      // If it's my own seat, update local state
+      if (data.seat.user_id === user?.id) {
+        setOnSeat(data.seat.number);
+        if (data.type === 'take') {
+          setIsMuted(data.seat.is_muted);
+          livekitService.publish().catch(console.error);
+        }
+      } else if (data.type === 'leave' && onSeat === data.seat.number) {
+        // I was kicked or manually left (server side)
+        setOnSeat(null);
+        livekitService.unpublish().catch(console.error);
+      }
+      
+      // Sync mute state if it changed for me
+      if (data.seat.user_id === user?.id && data.seat.is_muted !== isMuted) {
+        setIsMuted(data.seat.is_muted);
+        livekitService.setMuted(data.seat.is_muted);
+      }
     });
 
     // Listen for entry effects and member updates
@@ -827,25 +873,27 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
     if (seat?.is_locked) return;
     
     try {
-      const { data, error } = await supabase
-        .from('seats')
-        .update({
-          user_id: user.id,
-          joined_at: new Date().toISOString(),
-        })
-        .eq('room_id', roomId)
-        .eq('number', seatNumber)
-        .select()
-        .single();
-      
-      if (data) {
-        setOnSeat(seatNumber);
-        setIsMuted(false);
-        // Start publishing audio
-        livekitService.publish();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      const res = await fetch('/api/room/seat/take', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ roomId, seatNumber })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "فشل الصعود للمايك");
       }
-    } catch (error) {
+
+      // State is updated via Pusher listener
+    } catch (error: any) {
       console.error('Error taking seat:', error);
+      alert(error.message);
     }
   };
 
@@ -853,19 +901,27 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
     if (!user || onSeat === null) return;
     
     try {
-      await supabase
-        .from('seats')
-        .update({
-          user_id: null,
-          joined_at: null,
-        })
-        .eq('room_id', roomId)
-        .eq('number', onSeat);
-      
-      await livekitService.unpublish();
-      setOnSeat(null);
-    } catch (error) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
+
+      const res = await fetch('/api/room/seat/leave', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ roomId, seatNumber: onSeat })
+      });
+
+      if (!res.ok) {
+        const err = await res.json();
+        throw new Error(err.error || "فشل ترك المايك");
+      }
+
+      // State is updated via Pusher listener
+    } catch (error: any) {
       console.error('Error leaving seat:', error);
+      alert(error.message);
     }
   };
 
@@ -1366,6 +1422,40 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
           </button>
         </div>
       </header>
+
+      {/* Gift Animation Overlay */}
+      <AnimatePresence>
+        {activeGiftAnimation && (
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.5, y: 50 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 1.5 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center pointer-events-none"
+          >
+            <div className="bg-gradient-to-b from-amber-500/20 to-neutral-900/90 backdrop-blur-xl border border-amber-500/30 rounded-[40px] p-8 flex flex-col items-center gap-6 shadow-2xl shadow-amber-500/20">
+              <motion.div 
+                animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.2, 1] }}
+                transition={{ repeat: Infinity, duration: 2 }}
+                className="text-8xl"
+              >
+                🎊
+              </motion.div>
+              <div className="text-center">
+                <p className="text-amber-500 font-black text-xl mb-1">{activeGiftAnimation.sender}</p>
+                <p className="text-white text-sm opacity-60 mb-2">أرسل هدية مميزة إلى</p>
+                <p className="text-white font-black text-2xl">{activeGiftAnimation.recipient}</p>
+              </div>
+              <motion.div 
+                animate={{ y: [0, -10, 0] }}
+                transition={{ repeat: Infinity, duration: 1.5 }}
+                className="bg-white/10 px-6 py-2 rounded-full border border-white/5"
+              >
+                <span className="text-amber-500 font-bold">✨ هدية ملكية ✨</span>
+              </motion.div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Announcement Banner */}
       {room.announcement && (
