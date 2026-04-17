@@ -318,7 +318,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
           } as any;
 
           // Lockdown check
-          const myMember = members.find(m => m.userId === user.id);
+          const myMember = members.find(m => m.user_id === user.id);
           const isStaff = myMember && ['owner', 'admin', 'moderator', 'observer'].includes(myMember.role);
           
           // Ban check
@@ -502,6 +502,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
     // Pusher for room chat
     const channel = pusher.subscribe(`room-${roomId}`);
     channel.bind('new-message', (data: { message: ChatMessage }) => {
+      console.log('📩 New message received via Pusher:', data.message.content);
       setMessages(prev => [...prev, data.message]);
       if (notificationSound.current) {
         notificationSound.current.currentTime = 0;

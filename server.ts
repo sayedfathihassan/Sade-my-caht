@@ -118,7 +118,13 @@ app.post("/api/room/chat", authenticateJWT, async (req: any, res) => {
   }
 
   if (!filtered) {
-    await pusher.trigger(`room-${roomId}`, "new-message", { message });
+    console.log(`📡 Triggering Pusher for room ${roomId}: ${message.content}`);
+    try {
+      await pusher.trigger(`room-${roomId}`, "new-message", { message });
+      console.log('✅ Pusher trigger successful');
+    } catch (triggerError) {
+      console.error('❌ Pusher trigger failed:', triggerError);
+    }
   }
 
   res.json({ success: true, filtered });
