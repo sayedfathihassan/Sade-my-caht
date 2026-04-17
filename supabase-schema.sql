@@ -650,7 +650,96 @@ CREATE POLICY "Admins update settings" ON settings FOR ALL USING (
 );
 
 -- ==========================================
--- 11. FIRST OWNER ACCOUNT SETUP
+-- 11. SOCIAL INTERACTIONS (LIKES & COMMENTS)
+-- ==========================================
+
+CREATE TABLE post_likes (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(post_id, user_id)
+);
+
+CREATE TABLE post_comments (
+  id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+  post_id UUID REFERENCES posts(id) ON DELETE CASCADE,
+  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
+  username TEXT NOT NULL,
+  avatar_url TEXT,
+  content TEXT NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+-- ==========================================
+-- 12. AUTOMATED SOCIAL LOGIC (TRIGGERS)
+-- ==========================================
+
+-- A. Update User Follower/Following Counts
+CREATE OR REPLACE FUNCTION handle_follow_counts() 
+RETURNS TRIGGER AS $$
+BEGIN
+  IF (TG_OP = 'INSERT') THEN
+    -- Increment follower count for target user
+    UPDATE users SET follower_count = follower_count + 1 WHERE id = NEW.following_id;
+    -- Increment following count for follower user
+    UPDATE users SET following_count = following_count + 1 WHERE id = NEW.follower_id;
+    
+    -- CREATE NOTIFICATION for target user
+    INSERT INTO notifications (user_id, type, title, message, data)
+    SELECT 
+      NEW.following_id,
+      'follow',
+      'متابع جديد',
+      u.username || ' بدأ بمتابعتك الآن!',
+      jsonb_build_object('follower_id', NEW.follower_id, 'username', u.username)
+    FROM users u WHERE u.id = NEW.follower_id;
+    
+    RETURN NEW;
+  ELSIF (TG_OP = 'DELETE') THEN
+    UPDATE users SET follower_count = GREATEST(0, follower_count - 1) WHERE id = OLD.following_id;
+    UPDATE users SET following_count = GREATEST(0, following_count - 1) WHERE id = OLD.follower_id;
+    RETURN OLD;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_follow_update
+AFTER INSERT OR DELETE ON follows
+FOR EACH ROW EXECUTE FUNCTION handle_follow_counts();
+
+-- B. Update Post Likes Count
+CREATE OR REPLACE FUNCTION handle_post_likes_count() 
+RETURNS TRIGGER AS $$
+BEGIN
+  IF (TG_OP = 'INSERT') THEN
+    UPDATE posts SET likes = likes + 1 WHERE id = NEW.post_id;
+    RETURN NEW;
+  ELSIF (TG_OP = 'DELETE') THEN
+    UPDATE posts SET likes = GREATEST(0, likes - 1) WHERE id = OLD.post_id;
+    RETURN OLD;
+  END IF;
+  RETURN NULL;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+CREATE TRIGGER on_post_like_update
+AFTER INSERT OR DELETE ON post_likes
+FOR EACH ROW EXECUTE FUNCTION handle_post_likes_count();
+
+-- RLS for new tables
+ALTER TABLE post_likes ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public read likes" ON post_likes FOR SELECT USING (true);
+CREATE POLICY "Users manage own likes" ON post_likes FOR ALL USING (auth.uid() = user_id);
+
+ALTER TABLE post_comments ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Public read comments" ON post_comments FOR SELECT USING (true);
+CREATE POLICY "Users can comment" ON post_comments FOR INSERT WITH CHECK (auth.role() = 'authenticated');
+CREATE POLICY "Users manage own comments" ON post_comments FOR ALL USING (auth.uid() = user_id);
+
+-- ==========================================
+-- 13. FIRST OWNER ACCOUNT SETUP
 -- ==========================================
 -- ⚠️  Run this ONCE after your first login to grant yourself full Super Admin access.
 -- Replace 'YOUR_EMAIL_HERE' with the email you used to sign up.
@@ -663,3 +752,4 @@ CREATE POLICY "Admins update settings" ON settings FOR ALL USING (
 --   diamonds = 99999,
 --   is_verified = true
 -- WHERE email = 'YOUR_EMAIL_HERE';
+

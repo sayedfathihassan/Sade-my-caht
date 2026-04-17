@@ -19,41 +19,36 @@ export function CreateRoomModal({ isOpen, onClose, onCreated }: CreateRoomModalP
 
   const handleCreate = async () => {
     if (!name.trim() || !user) return;
+    
+    const ROOM_COST = 900;
+    if (user.coins < ROOM_COST) {
+      alert(`تحتاج إلى ${ROOM_COST} عملة لإنشاء غرفة. رصيدك الحالي: ${user.coins}`);
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const { data: room, error } = await supabase
-        .from('rooms')
-        .insert([{
-          owner_id: user.id,
-          name,
-          is_live: true,
-          member_count: 1
-        }])
-        .select()
-        .single();
+      const { data: sessionData } = await supabase.auth.getSession();
+      const token = sessionData.session?.access_token;
 
-      if (error) throw error;
+      const response = await fetch('/api/room/create', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ name, type })
+      });
 
-      // Initialize seats
-      const seats = Array.from({ length: 6 }, (_, i) => ({
-        room_id: room.id,
-        number: i + 1,
-        user_id: null,
-        is_locked: false,
-        is_muted: false
-      }));
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "فشل إنشاء الغرفة");
 
-      const { error: seatsError } = await supabase
-        .from('seats')
-        .insert(seats);
-
-      if (seatsError) throw seatsError;
-
-      onCreated(room.id);
+      onCreated(result.roomId);
       onClose();
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating room:', error);
+      alert(error.message);
     } finally {
       setLoading(false);
     }

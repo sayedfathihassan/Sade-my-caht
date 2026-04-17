@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { Notification } from "../types";
 import { notificationService } from "../services/notificationService";
 import { motion, AnimatePresence } from "motion/react";
-import { Bell, X, MessageSquare, Megaphone, Gift, Info, Trash2, Check } from "lucide-react";
+import { Bell, X, MessageSquare, Megaphone, Gift, Info, Trash2, Check, UserPlus, Heart } from "lucide-react";
 import { cn } from "../lib/utils";
 
 interface NotificationPanelProps {
@@ -30,6 +30,9 @@ export function NotificationPanel({ isOpen, onClose, userId, onAction }: Notific
   const getIcon = (type: string) => {
     switch (type) {
       case 'private_message': return <MessageSquare className="w-4 h-4 text-blue-500" />;
+      case 'follow': return <UserPlus className="w-4 h-4 text-amber-500" />;
+      case 'like': return <Heart className="w-4 h-4 text-rose-500 fill-rose-500" />;
+      case 'comment': return <MessageSquare className="w-4 h-4 text-green-500" />;
       case 'room_announcement': return <Megaphone className="w-4 h-4 text-amber-500" />;
       case 'gift_arrival': return <Gift className="w-4 h-4 text-rose-500" />;
       default: return <Info className="w-4 h-4 text-neutral-500" />;

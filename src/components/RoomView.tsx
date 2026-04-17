@@ -587,7 +587,6 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
       setRoom(prev => prev ? ({ ...prev, slowModeDelay: data.delay }) : null);
     });
 
-    channel.bind('user-entered', (data: { userId: string, effectId: string, username: string, avatarUrl?: string, frameId?: string, badgeId?: string }) => {
       if (data.userId !== user.id) {
         const effectInstanceId = Math.random().toString(36).substring(7);
         setActiveEntryEffects(prev => [...prev, {
@@ -599,6 +598,8 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
           badgeId: data.badgeId
         }]);
       }
+      // Refresh member list when someone enters
+      fetchRoomUsers();
     });
 
     channel.bind('new-reaction', (data: { messageId: string, emoji: string, userId: string }) => {
@@ -634,10 +635,10 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
       if (data) {
         setMembers(data);
         setRoomUsers(data.map(m => ({
-          id: m.users.id,
-          username: m.users.username,
-          avatarUrl: m.users.avatar_url
-        })));
+          id: m.users?.id,
+          username: m.users?.username || 'مستخدم',
+          avatarUrl: m.users?.avatar_url
+        })).filter(u => u.id));
       }
     };
     fetchRoomUsers();
@@ -1777,47 +1778,39 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
         userCoins={user?.coins || 0}
         onSpinStart={async (bet) => {
           if (!user) return;
-          try {
-            await supabase
-              .from('users')
-              .update({ coins: user.coins - bet })
-              .eq('id', user.id);
-            await taskService.updateTaskProgress(user.id, 'game', 1);
-          } catch (error) {
-            console.error('Error starting spin:', error);
-          }
+          // Local task progress update
+          await taskService.updateTaskProgress(user.id, 'game', 1);
         }}
         onWin={async (reward, bet) => {
           if (!user) return;
           try {
-            let updates: any = {};
-            if (reward.type === 'coins') {
-              updates.coins = user.coins + Math.floor(reward.value * bet);
-            }
-            if (reward.type === 'diamonds') {
-              updates.diamonds = user.diamonds + reward.value;
-            }
-            if (reward.type === 'xp') {
-              const newXp = (user.xp || 0) + reward.value;
-              updates.xp = newXp;
-              if (newXp >= (user.nextLevelXp || 100)) {
-                updates.level = (user.level || 1) + 1;
-                updates.next_level_xp = Math.floor((user.nextLevelXp || 100) * 1.5);
-                await handleSendMessage(`وصل إلى المستوى ${(user.level || 1) + 1}! 🎉`, "system");
-              }
+            const { data: sessionData } = await supabase.auth.getSession();
+            const token = sessionData.session?.access_token;
+            
+            const response = await fetch('/api/game/wheel/spin', {
+              method: 'POST',
+              headers: { 
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({ bet })
+            });
+
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || "فشل تشغيل العجلة");
+
+            // Show message for winning
+            if (result.reward.type !== 'nothing') {
+              await handleSendMessage(`ربح ${result.reward.label} من عجلة الحظ! 🎡✨`, "system");
             }
 
-            if (Object.keys(updates).length > 0) {
-              await supabase
-                .from('users')
-                .update(updates)
-                .eq('id', user.id);
-              
-              if (reward.type !== 'nothing') {
-                await handleSendMessage(`ربح ${reward.label} من عجلة الحظ! 🎡✨`, "system");
-              }
-            }
-          } catch (error) {
+            // Note: The AuthContext will automatically update user state via Supabase Realtime
+            // or we could manually refresh if needed.
+          } catch (error: any) {
+            console.error('Spin result processing failed:', error);
+            alert(error.message);
+          }
+        }}
             console.error('Error handling win:', error);
           }
         }}
@@ -2060,7 +2053,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
                         }}
                       >
                         <div className="flex items-center gap-3">
-                          <UserAvatar username={member.users.id} size="md" className={cn("border-2", getRoleColor(member.role).replace('text-', 'border-'))} />
+                          <UserAvatar username={member.users?.username} size="md" className={cn("border-2", getRoleColor(member.role).replace('text-', 'border-'))} />
                           <div>
                             <p className={cn("font-bold text-sm", getRoleColor(member.role))}>{member.users.username}</p>
                             <div className="flex items-center gap-2">
@@ -2099,7 +2092,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
                         }}
                       >
                         <div className="flex items-center gap-3">
-                          <UserAvatar username={member.users.id} size="md" />
+                          <UserAvatar username={member.users?.username} size="md" />
                           <div>
                             <p className="font-bold text-sm">{member.users.username}</p>
                             <div className="flex items-center gap-2">

@@ -19,6 +19,11 @@ export function FollowFeed({ user, onOpenUser, onOpenCreatePost }: FollowFeedPro
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<'following' | 'global'>('following');
   const [storeItems, setStoreItems] = useState<StoreItem[]>([]);
+  const [likedPosts, setLikedPosts] = useState<Record<string, boolean>>({});
+  const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
+  const [postComments, setPostComments] = useState<Record<string, any[]>>({});
+  const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
+
 
   useEffect(() => {
     const unsub = storeService.subscribeToItems(setStoreItems);
@@ -43,6 +48,70 @@ export function FollowFeed({ user, onOpenUser, onOpenCreatePost }: FollowFeedPro
       setLoading(false);
     }
   };
+
+  const checkInitialLikes = async (postList: Post[]) => {
+    if (!user) return;
+    const likesMap: Record<string, boolean> = {};
+    for (const post of postList) {
+      const isLiked = await postService.getLikeStatus(post.id, user.id);
+      likesMap[post.id] = isLiked;
+    }
+    setLikedPosts(likesMap);
+  };
+
+  useEffect(() => {
+    if (posts.length > 0) {
+      checkInitialLikes(posts);
+    }
+  }, [posts, user?.id]);
+
+  const handleLike = async (postId: string) => {
+    if (!user) return;
+    const currentlyLiked = likedPosts[postId];
+    try {
+      if (currentlyLiked) {
+        await postService.unlikePost(postId, user.id);
+        setLikedPosts(prev => ({ ...prev, [postId]: false }));
+        setPosts(prev => prev.map(p => p.id === postId ? { ...p, likes: Math.max(0, p.likes - 1) } : p));
+      } else {
+        await postService.likePost(postId, user.id);
+        setLikedPosts(prev => ({ ...prev, [postId]: true }));
+        setPosts(prev => prev.map(p => p.id === postId ? { ...p, likes: p.likes + 1 } : p));
+      }
+    } catch (error) {
+      console.error("Like toggle failed", error);
+    }
+  };
+
+  const toggleComments = async (postId: string) => {
+    const isExpanded = !expandedComments[postId];
+    setExpandedComments(prev => ({ ...prev, [postId]: isExpanded }));
+    
+    if (isExpanded && !postComments[postId]) {
+      try {
+        const comments = await postService.getComments(postId);
+        setPostComments(prev => ({ ...prev, [postId]: comments }));
+      } catch (error) {
+        console.error("Failed to fetch comments", error);
+      }
+    }
+  };
+
+  const handleAddComment = async (postId: string) => {
+    const content = commentInputs[postId];
+    if (!content?.trim() || !user) return;
+
+    try {
+      await postService.addComment(postId, user, content);
+      setCommentInputs(prev => ({ ...prev, [postId]: "" }));
+      // Refresh comments
+      const comments = await postService.getComments(postId);
+      setPostComments(prev => ({ ...prev, [postId]: comments }));
+    } catch (error) {
+      console.error("Comment failed", error);
+    }
+  };
+
 
   useEffect(() => {
     fetchPosts();
@@ -134,18 +203,84 @@ export function FollowFeed({ user, onOpenUser, onOpenCreatePost }: FollowFeedPro
 
                 {/* Actions */}
                 <div className="flex items-center gap-6 pt-4 border-t border-white/5">
-                  <button className="flex items-center gap-2 text-neutral-500 hover:text-rose-500 transition-colors group">
-                    <Heart className="w-5 h-5 group-hover:fill-rose-500" />
+                  <button 
+                    onClick={() => handleLike(post.id)}
+                    className={cn(
+                      "flex items-center gap-2 transition-colors group",
+                      likedPosts[post.id] ? "text-rose-500" : "text-neutral-500 hover:text-rose-500"
+                    )}
+                  >
+                    <Heart className={cn("w-5 h-5", likedPosts[post.id] && "fill-rose-500")} />
                     <span className="text-xs font-bold">{post.likes}</span>
                   </button>
-                  <button className="flex items-center gap-2 text-neutral-500 hover:text-blue-500 transition-colors">
+                  <button 
+                    onClick={() => toggleComments(post.id)}
+                    className={cn(
+                      "flex items-center gap-2 transition-colors",
+                      expandedComments[post.id] ? "text-blue-500" : "text-neutral-500 hover:text-blue-500"
+                    )}
+                  >
                     <MessageCircle className="w-5 h-5" />
-                    <span className="text-xs font-bold">0</span>
+                    <span className="text-xs font-bold">{post.commentsCount || 0}</span>
                   </button>
                   <button className="flex items-center gap-2 text-neutral-500 hover:text-green-500 transition-colors mr-auto">
                     <Share2 className="w-5 h-5" />
                   </button>
                 </div>
+
+                {/* Comments Section */}
+                <AnimatePresence>
+                  {expandedComments[post.id] && (
+                    <motion.div
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      className="overflow-hidden"
+                    >
+                      <div className="pt-4 space-y-4">
+                        {/* Comment Input */}
+                        <div className="flex gap-3">
+                          <UserAvatar username={user.username} src={user.avatarUrl} size="sm" />
+                          <div className="flex-1 flex gap-2">
+                            <input
+                              type="text"
+                              value={commentInputs[post.id] || ""}
+                              onChange={(e) => setCommentInputs(prev => ({ ...prev, [post.id]: e.target.value }))}
+                              onKeyDown={(e) => e.key === 'Enter' && handleAddComment(post.id)}
+                              placeholder="اكتب تعليقاً..."
+                              className="flex-1 bg-white/5 border border-white/5 rounded-xl px-4 py-2 text-xs focus:outline-none focus:border-amber-500/50 transition-colors"
+                            />
+                            <button 
+                              onClick={() => handleAddComment(post.id)}
+                              className="p-2 bg-amber-500 text-black rounded-xl hover:bg-amber-400 transition-colors"
+                            >
+                              <Send className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Comments List */}
+                        <div className="space-y-3 max-h-60 overflow-y-auto pr-2 custom-scrollbar">
+                          {postComments[post.id]?.map((comment) => (
+                            <div key={comment.id} className="flex gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300">
+                              <UserAvatar username={comment.username} src={comment.avatar_url} size="sm" />
+                              <div className="flex-1 bg-white/5 rounded-2xl p-3">
+                                <p className="text-[11px] font-bold mb-1 text-amber-500">{comment.username}</p>
+                                <p className="text-xs text-neutral-300 leading-normal">{comment.content}</p>
+                                <p className="text-[8px] text-neutral-600 mt-2">
+                                  {new Date(comment.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                </p>
+                              </div>
+                            </div>
+                          ))}
+                          {(!postComments[post.id] || postComments[post.id].length === 0) && (
+                            <p className="text-[10px] text-neutral-600 text-center py-4">لا توجد تعليقات بعد. كن أول من يعلق!</p>
+                          )}
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </motion.div>
           ))

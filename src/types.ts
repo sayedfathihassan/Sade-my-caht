@@ -309,6 +309,7 @@ export interface Post {
   content: string;
   imageUrl?: string;
   likes: number;
+  commentsCount?: number;
   createdAt: string;
 }
 
@@ -330,7 +331,7 @@ export interface UserInventoryItem {
   purchasedAt: string;
 }
 
-export type NotificationType = 'private_message' | 'room_announcement' | 'gift_arrival' | 'system';
+export type NotificationType = 'private_message' | 'room_announcement' | 'gift_arrival' | 'follow' | 'like' | 'comment' | 'system';
 
 export interface Notification {
   id: string;
