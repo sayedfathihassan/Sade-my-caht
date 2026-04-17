@@ -155,9 +155,22 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
 
   // XP System - runs every minute while in room
   const userRef = useRef(user);
+  const roomIdRef = useRef(roomId);
+
   useEffect(() => {
     userRef.current = user;
-  }, [user]);
+    roomIdRef.current = roomId;
+  }, [user, roomId]);
+
+  // Pusher Connection Logging
+  useEffect(() => {
+    pusher.connection.bind('state_change', (states: any) => {
+      console.log('📡 Pusher connection state:', states.current);
+    });
+    return () => {
+      pusher.connection.unbind('state_change');
+    };
+  }, []);
 
   useEffect(() => {
     if (!user?.id) return;
@@ -233,8 +246,11 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
   useEffect(() => {
     if (!user || !roomId) return;
     
-    const joinRoom = async () => {
-      await supabase
+    const joinRoomAndFetchData = async () => {
+      console.log('🚪 User entering room:', roomId);
+      
+      // UPSERT room_members
+      const { error: upsertError } = await supabase
         .from('room_members')
         .upsert([{
           room_id: roomId,
@@ -242,15 +258,12 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
           is_active: true
         }]);
       
-      // Update member_count in rooms table
-      const { data: activeMembers } = await supabase
-        .from('room_members')
-        .select('id', { count: 'exact', head: true })
-        .eq('room_id', roomId)
-        .eq('is_active', true);
+      if (upsertError) console.error('❌ Error joining room:', upsertError);
+
+      // Fetch users immediately
+      await fetchRoomUsers();
       
-      const count = (activeMembers as any)?.length ?? 0;
-      // Use count query instead
+      // Update global member_count in rooms table
       const { count: memberCount } = await supabase
         .from('room_members')
         .select('*', { count: 'exact', head: true })
@@ -265,7 +278,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
       }
     };
 
-    joinRoom();
+    joinRoomAndFetchData();
 
     return () => {
       supabase
@@ -732,6 +745,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
       };
 
       // Send via Pusher API
+      console.log('📤 Sending message to server:', msgData.content);
       const res = await fetch('/api/room/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -743,8 +757,10 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
       });
 
       const data = await res.json();
+      console.log('📩 Message API response:', data);
+      
       if (data.filtered) {
-        // Optional: notify user their message was filtered
+        console.warn('⚠️ Message was filtered by auto-mod');
       }
 
       setChatInput("");
@@ -1810,9 +1826,6 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
           } catch (error: any) {
             console.error('Spin result processing failed:', error);
             alert(error.message);
-          }
-        }}
-            console.error('Error handling win:', error);
           }
         }}
       />

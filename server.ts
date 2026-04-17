@@ -459,8 +459,8 @@ app.post("/api/task/claim", authenticateJWT, async (req: any, res) => {
     if (!task) {
       // Fallback for default daily tasks to prevent failure
       const DAILY_TASKS = [
-        { id: 'task_time', target: 30, rewardCoins: 500, rewardXp: 100 },
-        { id: 'task_chat', target: 20, rewardCoins: 200, rewardXp: 50 },
+        { id: 'task_time', target: 20, rewardCoins: 500, rewardXp: 100 },
+        { id: 'task_chat', target: 10, rewardCoins: 200, rewardXp: 50 },
         { id: 'task_gift', target: 5, rewardCoins: 1000, rewardXp: 200 },
         { id: 'task_mic', target: 10, rewardCoins: 800, rewardXp: 150 },
         { id: 'task_game', target: 3, rewardCoins: 400, rewardXp: 100 },
