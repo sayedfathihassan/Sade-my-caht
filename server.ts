@@ -250,16 +250,37 @@ app.post("/api/room/create", authenticateJWT, async (req: any, res) => {
   const ROOM_COST = 900;
  
   try {
-    // 1. Check user balance
+    // 1. ENSURE USER PROFILE EXISTS (Fixes rooms_owner_id_fkey violation)
     const { data: user, error: userError } = await supabaseAdmin
-      .from('users').select('coins, username').eq('id', userId).single();
+      .from('users').select('coins, username, email').eq('id', userId).single();
     
-    if (userError || !user) throw new Error("المستخدم غير موجود");
-    if (user.coins < ROOM_COST) {
-      return res.status(400).json({ error: `رصيد غير كافٍ. تحتاج إلى ${ROOM_COST} عملة.` });
+    if (userError || !user) {
+      console.log(`👤 User profile not found for ${userId}, creating auto-profile...`);
+      // Auto-create profile if missing
+      const { data: newUser, error: createError } = await supabaseAdmin.from('users').insert({
+        id: userId,
+        username: req.user.user_metadata?.username || `مستخدم_${Math.floor(Math.random()*1000)}`,
+        email: req.user.email || '',
+        coins: 1000,
+        xp: 0
+      }).select().single();
+      
+      if (createError) throw new Error("فشل إنشاء ملف المستخدم: " + createError.message);
+      
+      // Use the newly created user for balance check
+      if (newUser.coins < ROOM_COST) {
+        return res.status(400).json({ error: `رصيد غير كافٍ. تحتاج إلى ${ROOM_COST} عملة.` });
+      }
+    } else {
+      if (user.coins < ROOM_COST) {
+        return res.status(400).json({ error: `رصيد غير كافٍ. تحتاج إلى ${ROOM_COST} عملة.` });
+      }
     }
- 
-    // 2. Generate unique room ID if needed, but let DB handle it
+
+    // 2. Generate unique room_uid (random 6 digits) until we add SQL trigger
+    const roomUid = Math.floor(100000 + Math.random() * 900000).toString();
+
+    // 3. Insert Room
     const { data: newRoom, error: roomError } = await supabaseAdmin
       .from('rooms')
       .insert({
@@ -267,7 +288,10 @@ app.post("/api/room/create", authenticateJWT, async (req: any, res) => {
         owner_id: userId,
         type: type || 'public',
         is_live: false,
-        member_count: 1
+        member_count: 1,
+        active_pk_id: null,
+        active_lucky_box_id: null
+        // room_uid will be handled by DB or we can add it here if column exists
       })
       .select()
       .single();

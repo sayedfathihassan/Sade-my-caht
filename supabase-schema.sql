@@ -152,8 +152,18 @@ CREATE TABLE rooms (
   active_lucky_box_id UUID,
   seat_names JSONB DEFAULT '{}'::jsonb,
   
+  -- Numeric Public ID (6-9 digits)
+  room_uid TEXT UNIQUE,
+  
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Constraint: room_uid must be 6-9 digits only
+ALTER TABLE rooms
+  ADD CONSTRAINT room_uid_format
+  CHECK (room_uid IS NULL OR room_uid ~ '^[0-9]{6,9}$');
+
+CREATE UNIQUE INDEX idx_rooms_room_uid ON rooms (room_uid);
 
 CREATE TABLE room_members (
   id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
@@ -739,17 +749,55 @@ CREATE POLICY "Users can comment" ON post_comments FOR INSERT WITH CHECK (auth.r
 CREATE POLICY "Users manage own comments" ON post_comments FOR ALL USING (auth.uid() = user_id);
 
 -- ==========================================
--- 13. FIRST OWNER ACCOUNT SETUP
+-- 14. AUTO-GENERATE NUMERIC UIDs
 -- ==========================================
--- ⚠️  Run this ONCE after your first login to grant yourself full Super Admin access.
--- Replace 'YOUR_EMAIL_HERE' with the email you used to sign up.
---
--- UPDATE users
--- SET
---   role = 'admin',
---   is_super_admin = true,
---   coins = 999999,
---   diamonds = 99999,
---   is_verified = true
--- WHERE email = 'YOUR_EMAIL_HERE';
+
+-- Function to generate a random numeric string
+CREATE OR REPLACE FUNCTION generate_unique_uid(table_name TEXT, column_name TEXT) 
+RETURNS TEXT AS $$
+DECLARE
+  new_uid TEXT;
+  exists_already BOOLEAN;
+BEGIN
+  LOOP
+    -- Generate random number between 100000 and 999999999
+    new_uid := floor(random() * (999999999 - 100000 + 1) + 100000)::TEXT;
+    
+    -- Check uniqueness
+    EXECUTE format('SELECT EXISTS (SELECT 1 FROM %I WHERE %I = %L)', table_name, column_name, new_uid) 
+    INTO exists_already;
+    
+    EXIT WHEN NOT exists_already;
+  END LOOP;
+  RETURN new_uid;
+END;
+$$ LANGUAGE plpgsql;
+
+-- Trigger for Users
+CREATE OR REPLACE FUNCTION handle_user_uid() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.user_uid IS NULL THEN
+    NEW.user_uid := generate_unique_uid('users', 'user_uid');
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER on_user_create_uid
+  BEFORE INSERT ON users
+  FOR EACH ROW EXECUTE FUNCTION handle_user_uid();
+
+-- Trigger for Rooms
+CREATE OR REPLACE FUNCTION handle_room_uid() RETURNS TRIGGER AS $$
+BEGIN
+  IF NEW.room_uid IS NULL THEN
+    NEW.room_uid := generate_unique_uid('rooms', 'room_uid');
+  END IF;
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER on_room_create_uid
+  BEFORE INSERT ON rooms
+  FOR EACH ROW EXECUTE FUNCTION handle_room_uid();
 

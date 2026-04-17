@@ -92,7 +92,8 @@ export function UserModal({ isOpen, onClose, userId, onStartChat, onSendGift, ro
           activeFrameId: data.active_frame_id,
           activeBadgeId: data.active_badge_id,
           activeChatBubbleId: data.active_chat_bubble_id,
-          activeEntryEffectId: data.active_entry_effect_id
+          activeEntryEffectId: data.active_entry_effect_id,
+          user_uid: data.user_uid
         });
       }
       setLoading(false);
