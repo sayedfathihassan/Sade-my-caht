@@ -820,6 +820,10 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
       if (data) {
         setOnSeat(seatNumber);
         setIsMuted(false);
+        // Start publishing audio
+        livekitService.publish();
+      }
+    } catch (error) {
       console.error('Error taking seat:', error);
     }
   };
