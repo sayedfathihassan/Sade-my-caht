@@ -1418,6 +1418,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
                     isOccupied ? "bg-transparent" : "bg-neutral-900/50 border-2 border-dashed border-neutral-800"
                   )}
                 >
+                  {isOccupied ? (
                     <div className="relative">
                       {/* Speaking Visualizer Overlay */}
                       {(() => {
