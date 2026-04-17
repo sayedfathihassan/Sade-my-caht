@@ -587,6 +587,7 @@ export function RoomView({ roomId, onExit }: RoomViewProps) {
       setRoom(prev => prev ? ({ ...prev, slowModeDelay: data.delay }) : null);
     });
 
+    channel.bind('user-entered', (data: { userId: string, effectId: string, username: string, avatarUrl?: string, frameId?: string, badgeId?: string }) => {
       if (data.userId !== user.id) {
         const effectInstanceId = Math.random().toString(36).substring(7);
         setActiveEntryEffects(prev => [...prev, {
