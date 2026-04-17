@@ -49,57 +49,47 @@ export function WheelOfFortune({ isOpen, onClose, userCoins, onSpinStart, onWin 
     loseSound.current = new Audio("https://assets.mixkit.co/active_storage/sfx/2018/2018-preview.mp3");
   }, []);
 
-  const spin = () => {
+  const spin = async () => {
     if (isSpinning || userCoins < betAmount) return;
     
     setIsSpinning(true);
     setResult(null);
-    onSpinStart(betAmount);
     
-    // Play spin sound
-    if (spinSound.current) {
-      spinSound.current.currentTime = 0;
-      spinSound.current.play().catch(() => {});
-    }
+    // Request result from server (via parent RoomView)
+    try {
+      // Re-use current spin animation logic but triggered by server result
+      const forcedRewardId = await onSpinStart(betAmount);
+      if (!forcedRewardId) throw new Error("فشل الحصول على النتيجة");
 
-    // Calculate result based on weights
-    const totalWeight = REWARDS.reduce((acc, r) => acc + r.weight, 0);
-    let random = Math.random() * totalWeight;
-    let selectedReward = REWARDS[0];
-    
-    for (const reward of REWARDS) {
-      if (random < reward.weight) {
-        selectedReward = reward;
-        break;
+      // Play spin sound
+      if (spinSound.current) {
+        spinSound.current.currentTime = 0;
+        spinSound.current.play().catch(() => {});
       }
-      random -= reward.weight;
-    }
 
-    const rewardIndex = REWARDS.indexOf(selectedReward);
-    const segmentAngle = 360 / REWARDS.length;
-    const extraSpins = 8 + Math.floor(Math.random() * 5); // More spins for drama
-    const targetRotation = rotation + (extraSpins * 360) + (360 - (rewardIndex * segmentAngle));
-    
-    setRotation(targetRotation);
-
-    setTimeout(() => {
-      setIsSpinning(false);
-      setResult(selectedReward);
-      onWin(selectedReward, betAmount);
+      const selectedReward = REWARDS.find(r => r.id === forcedRewardId) || REWARDS[0];
+      const rewardIndex = REWARDS.indexOf(selectedReward);
+      const segmentAngle = 360 / REWARDS.length;
+      const extraSpins = 8 + Math.floor(Math.random() * 5);
+      const targetRotation = rotation + (extraSpins * 360) + (360 - (rewardIndex * segmentAngle));
       
-      // Play sound based on result
-      if (selectedReward.type === 'nothing') {
-        if (loseSound.current) {
-          loseSound.current.currentTime = 0;
-          loseSound.current.play().catch(() => {});
+      setRotation(targetRotation);
+
+      setTimeout(() => {
+        setIsSpinning(false);
+        setResult(selectedReward);
+        onWin(selectedReward, betAmount);
+        
+        if (selectedReward.type === 'nothing') {
+          loseSound.current?.play().catch(() => {});
+        } else {
+          winSound.current?.play().catch(() => {});
         }
-      } else {
-        if (winSound.current) {
-          winSound.current.currentTime = 0;
-          winSound.current.play().catch(() => {});
-        }
-      }
-    }, 5000); // Match transition duration
+      }, 5000);
+    } catch (err) {
+      console.error(err);
+      setIsSpinning(false);
+    }
   };
 
   return (

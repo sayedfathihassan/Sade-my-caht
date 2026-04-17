@@ -139,7 +139,64 @@ app.post("/api/room/react", authenticateJWT, async (req: any, res) => {
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: "Pusher failed" }); }
 });
-
+ 
+// ─── Room: Create Room (Secure Transaction - 900 Coins) ───────────────────────
+app.post("/api/room/create", authenticateJWT, async (req: any, res) => {
+  const { name, type } = req.body;
+  const userId = req.user.id;
+ 
+  if (!name || name.trim().length < 2) {
+    return res.status(400).json({ error: "اسم الغرفة قصير جداً" });
+  }
+ 
+  const ROOM_COST = 900;
+ 
+  try {
+    // 1. Check user balance
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users').select('coins, username').eq('id', userId).single();
+    
+    if (userError || !user) throw new Error("المستخدم غير موجود");
+    if (user.coins < ROOM_COST) {
+      return res.status(400).json({ error: `رصيد غير كافٍ. تحتاج إلى ${ROOM_COST} عملة.` });
+    }
+ 
+    // 2. Generate unique room ID if needed, but let DB handle it
+    const { data: newRoom, error: roomError } = await supabaseAdmin
+      .from('rooms')
+      .insert({
+        name: name.trim(),
+        owner_id: userId,
+        type: type || 'public',
+        is_live: false,
+        member_count: 1
+      })
+      .select()
+      .single();
+ 
+    if (roomError || !newRoom) throw new Error("فشل إنشاء الغرفة في قاعدة البيانات");
+ 
+    // 3. Deduct coins
+    await supabaseAdmin.from('users')
+      .update({ coins: user.coins - ROOM_COST })
+      .eq('id', userId);
+ 
+    // 4. Add owner as first member
+    await supabaseAdmin.from('room_members')
+      .insert({
+        room_id: newRoom.id,
+        user_id: userId,
+        role: 'owner',
+        is_active: true
+      });
+ 
+    res.json({ success: true, roomId: newRoom.id, newBalance: user.coins - ROOM_COST });
+  } catch (err: any) {
+    console.error('Room creation failed:', err);
+    res.status(500).json({ error: err.message || "فشل إنشاء الغرفة" });
+  }
+});
+ 
 // ─── Room: Entry Effect ───────────────────────────────────────────────────────
 app.post("/api/room/entry", authenticateJWT, async (req: any, res) => {
   const { roomId, effectId, username, avatarUrl, frameId, badgeId } = req.body;
@@ -148,6 +205,80 @@ app.post("/api/room/entry", authenticateJWT, async (req: any, res) => {
     await pusher.trigger(`room-${roomId}`, "user-entered", { userId, effectId, username, avatarUrl, frameId, badgeId });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: "Pusher failed" }); }
+});
+ 
+// ─── Game: Wheel of Fortune Spin (Secure Deduction) ───────────────────────────
+app.post("/api/game/wheel/spin", authenticateJWT, async (req: any, res) => {
+  const { bet } = req.body;
+  const userId = req.user.id;
+ 
+  const betAmount = Number(bet);
+  if (isNaN(betAmount) || ![200, 500, 1000].includes(betAmount)) {
+    return res.status(400).json({ error: "قيمة الرهان غير صالحة" });
+  }
+ 
+  try {
+    const { data: user, error: userError } = await supabaseAdmin
+      .from('users').select('coins, username').eq('id', userId).single();
+    
+    if (userError || !user) throw new Error("المستخدم غير موجود");
+    if (user.coins < betAmount) return res.status(400).json({ error: "رصيد غير كافٍ" });
+ 
+    // Wheel Rewards Definition (Matches frontend for sync)
+    const REWARDS = [
+      { id: 'nothing1', value: 0, type: 'nothing', weight: 50 },
+      { id: 'c100', value: 0.5, type: 'coins', weight: 30 },
+      { id: 'nothing2', value: 0, type: 'nothing', weight: 40 },
+      { id: 'c500', value: 2, type: 'coins', weight: 15 },
+      { id: 'd1', value: 1, type: 'diamonds', weight: 10 },
+      { id: 'x200', value: 200, type: 'xp', weight: 15 },
+      { id: 'nothing3', value: 0, type: 'nothing', weight: 30 },
+      { id: 'c2000', value: 10, type: 'coins', weight: 3 },
+      { id: 'd10', value: 10, type: 'diamonds', weight: 2 },
+      { id: 'jackpot', value: 50, type: 'diamonds', weight: 1 },
+    ];
+ 
+    // Select reward server-side
+    const totalWeight = REWARDS.reduce((acc, r) => acc + r.weight, 0);
+    let random = Math.random() * totalWeight;
+    let selectedReward = REWARDS[0];
+    
+    for (const reward of REWARDS) {
+      if (random < reward.weight) {
+        selectedReward = reward;
+        break;
+      }
+      random -= reward.weight;
+    }
+ 
+    // Calculate new values
+    let newCoins = user.coins - betAmount;
+    let newDiamonds = user.diamonds || 0;
+    
+    if (selectedReward.type === 'coins') {
+       newCoins += Math.floor(betAmount * selectedReward.value);
+    } else if (selectedReward.type === 'diamonds') {
+       newDiamonds += selectedReward.value;
+    }
+ 
+    // Apply to DB
+    const { error: updateError } = await supabaseAdmin
+      .from('users')
+      .update({ coins: newCoins, diamonds: newDiamonds })
+      .eq('id', userId);
+ 
+    if (updateError) throw updateError;
+ 
+    res.json({ 
+      success: true, 
+      reward: selectedReward, 
+      newBalance: newCoins 
+    });
+ 
+  } catch (err: any) {
+    console.error('Wheel spin error:', err);
+    res.status(500).json({ error: "حدث خطأ أثناء تشغيل العجلة" });
+  }
 });
 
 // ─── Room: Settings Update ────────────────────────────────────────────────────

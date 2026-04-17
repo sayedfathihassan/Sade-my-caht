@@ -209,22 +209,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     
     console.log('🎙 Subscribing to Realtime profile updates for:', user.id);
     const userSub = supabase
-      .channel(`user_profile_${user.id}`)
+      .channel(`public:users:id=eq.${user.id}`)
       .on(
         'postgres_changes',
         {
-          event: 'UPDATE',
+          event: '*', // Listen to ALL events (UPDATE, DELETE, etc)
           schema: 'public',
           table: 'users',
           filter: `id=eq.${user.id}`,
         },
         (payload) => {
-          console.log('🚀 Realtime profile update received');
-          setUser(mapSupabaseUser(payload.new));
+          console.log('🚀 Realtime profile change detected:', payload.eventType);
+          if (payload.new) {
+            setUser(mapSupabaseUser(payload.new));
+          }
         }
       )
-      .subscribe();
-
+      .subscribe((status) => {
+        console.log('📡 Realtime subscription status:', status);
+      });
+ 
     return () => {
       console.log('🔇 Unsubscribing from Realtime profile updates');
       supabase.removeChannel(userSub);
